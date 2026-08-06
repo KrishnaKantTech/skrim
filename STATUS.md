@@ -1,9 +1,18 @@
 # Skrim — resume point
 
-Last updated: 2026-08-01. Read this first; it replaces re-deriving context.
+Last updated: 2026-08-06. Read this first; it replaces re-deriving context.
 
 **The product is now called Skrim** (was SecureShare). See "BR" below for what
 that renamed and, more importantly, what it deliberately did not.
+
+**Two repos as of 2026-08-06.** This one is public and source-available
+(`github.com/krishnawp/skrim`, see `LICENSE` and `README.md`) — the source is
+published so the privacy claims are checkable, not so the extension can be
+repackaged. Everything commercial — pricing, funnel maths, launch sequencing —
+lives in a **separate private repo**, `skrim-gtm`, alongside this one on disk.
+That split is not tidiness: this repo is cloned into a Cloudflare build
+container on every deploy and is readable by anyone, and neither should be true
+of a pricing plan.
 
 ## How to test right now
 
@@ -16,6 +25,20 @@ node tools/mutate-recorders.mjs     # same, for the Loom / other-extension layer
 node tools/live-test.mjs            # ~75s, drives a REAL Chrome; needs no attention
 node tools/check-listing.mjs        # store listing vs Chrome's field caps AND the code it claims
 ```
+
+The website is live and can be swept without a login (see "SITE" below):
+
+```bash
+curl -sI https://skrim.app/privacy | head -1          # the store listing's link
+curl -so /dev/null -w '%{http_code}\n' https://skrim.app/nope   # 404.html
+curl -s -X POST https://skrim.app/api/waitlist \
+  -H 'Content-Type: application/json' -H 'Accept: application/json' \
+  -d '{"email":"x@example.com","company":"bot"}'      # honeypot: {"ok":true}, no row
+```
+
+The honeypot and invalid-email paths are the two that exercise the endpoint end
+to end while provably writing nothing, which is what makes them safe to run
+against production as often as you like.
 
 Load the extension by hand: `chrome://extensions` → Developer mode → "Load
 unpacked" → the `extension/` folder. (`--load-extension` no longer works on
@@ -76,7 +99,8 @@ until that check exposed it.
 | SY | the sync side effect: release tab shares, say the rest out loud | **done** — 10/10 mutations caught. See below |
 | X | recorders living in ANOTHER extension (Loom) | **done** — 10/10 mutations caught, premise proven in real Chrome. See below |
 | BR | brand guidelines v1.0 applied, rename to Skrim | **done** — see below |
-| M4 | Web Store prep (policy, listing, $5) | **in progress** — icons exist, developer panel gated, policy and listing copy written, store images built. A public URL for the policy (`skrim.app/privacy` — domain bought, nothing deployed) + clean-profile walk left. See below |
+| SITE | skrim.app: policy, recovery page, landing, waitlist | **done 2026-08-06** — deployed, swept green. See below |
+| M4 | Web Store prep (policy, listing, $5) | **in progress** — everything code-side is done and `skrim.app/privacy` is now public, which was the last hard blocker. Left: the Chrome Web Store developer account, a clean-profile walk, and the submission itself. See below |
 
 ## BR — the brand, and the rename
 
@@ -199,8 +223,40 @@ hidden.
 
 ### Still to do before submitting
 
-A public URL for the privacy policy and a clean-profile walk with no dev mode,
-then submit. Tracked in `GTM-PLAN.md`.
+Three things, none of them code: **the Chrome Web Store developer account**
+(the $5 and the identity/trader verification — the only step that waits on
+Google's queue rather than on us, so it is the one to start first), a
+**clean-profile walk**, and the submission. Sequencing lives in `skrim-gtm`.
+
+`skrim.app/privacy` is live as of 2026-08-06 and was the last hard blocker; see
+"SITE" below.
+
+**Submit as Unlisted first, then flip to Public.** Same review queue, but on
+approval it gives a real store install — and a store install is the only thing
+that carries an `update_url`, which is what the developer-gate branch keys off.
+`live-test.mjs` L2b asserts the *unpacked* branch only (`updateUrl === false &&
+shown && wired`); the shipped branch is covered by `P-3` and `M4-a`..`M4-c` but
+has never run in real Chrome, because nothing outside the store can make Chrome
+inject that field. Flipping visibility afterwards does not re-trigger review.
+
+**`extension.zip` must be built from inside `extension/`, not by Finder.** The
+store reads `manifest.json` at the *archive root*; a Finder "Compress" of the
+folder nests everything under `extension/` and the upload is rejected before
+review with "Manifest file is missing or unreadable". It also injects a
+`__MACOSX/` resource-fork entry per file and sweeps up `.DS_Store`. The first
+zip committed here had all three faults. Rebuild with:
+
+```bash
+cd extension && zip -r -X ../extension.zip . -x '.DS_Store' && cd ..
+unzip -l extension.zip | grep -E 'manifest|__MACOSX|DS_Store'
+# manifest.json must appear with NO path prefix, and be the only line printed
+```
+
+Nothing checks this automatically — `check-listing.mjs` validates the listing
+and the assets, not the package — so it is a manual step to re-verify on every
+resubmit. **Bump `manifest.json` `version` on every resubmit too**; the store
+refuses a re-upload at a version it has already seen, which is exactly the wall
+you hit mid-rejection-round when you are least in the mood for it.
 
 **The store images are built**: `brand/store/`, five screenshots at 1280×800
 and the small promo tile at 440×220, from `tools/make-store-assets.mjs`. The
@@ -268,10 +324,105 @@ turns the uninstall URL into a real request (a count and a timestamp; the
 bookmark payload stays in the fragment). The policy states the bundled
 `recovery.html` as today's destination and promises an update before that
 changes. Two things it discloses rather than buries: Chrome Sync propagating the
-vault/receipt/decoys (see "SY"), and the fragment never reaching a server. It
-still needs a public URL before submission — `skrim.app/privacy` is where it
-goes, the domain is bought but nothing is served from it yet — and the contact
-address is the developer email until a `skrim.app` mailbox exists.
+vault/receipt/decoys (see "SY"), and the fragment never reaching a server. It is
+**live at `skrim.app/privacy`** as of 2026-08-06, which is the URL to paste into
+the listing. The contact address is the developer email until a `skrim.app`
+mailbox exists.
+
+One wrinkle the deploy created: the repo now contains network code, in
+`worker/`. The policy and all nine "Not collected" disclosures rest on a grep
+that is **scoped to `extension/`**, and that scoping is now load-bearing rather
+than incidental. `check-listing.mjs` re-runs it on every check, so a `fetch` can
+only reach the extension by turning the listing red first. `README.md` states
+the boundary out loud for the same reason — an auditor who finds a Worker in a
+repo claiming zero egress deserves the answer before they have to ask.
+
+## SITE — skrim.app, deployed 2026-08-06
+
+Live and swept green. A Cloudflare Worker (`worker/index.mjs`) with static
+assets (`site/`) and one D1 database (`skrim-waitlist`), configured entirely by
+`wrangler.jsonc`.
+
+**Two of these URLs are effectively permanent and must never move.**
+`/privacy` goes into the Chrome Web Store listing, where changing it means an
+edit and a re-review. `/restore` is worse: it is what `receipt.RECOVERY_BASE`
+will point at once it is set, and a receipt URL is written *into the user's
+bookmark tree* — it syncs to their other devices and outlives an uninstall, so
+it has to resolve for as long as anyone still holds one. That is a commitment
+measured in years, made by a one-line config change, which is why the config
+says so in a comment rather than leaving it to be rediscovered.
+
+### What is public, and why almost nothing is
+
+`assets.directory` is `./site`. Only what is inside it is uploaded to the edge;
+the Worker script is compiled and uploaded through a different channel entirely,
+which is why `/worker/index.mjs` 404s while running on every request. The build
+container clones the whole repo — `extension/`, `brand/`, `snapshots/`, `.git`
+— but none of it is uploaded and none of it is reachable. Verified rather than
+assumed: `/STATUS.md`, `/package.json`, `/wrangler.jsonc`, `/schema.sql`,
+`/extension/manifest.json`, `/extension/src/engine.js`, `/brand/store/*.png`,
+`/tools/test-engine.mjs` and `/.git/config` all return 404.
+
+**This is an allowlist, not a denylist** — the inverse of the Vercel model,
+where the build output ships and you exclude from it. Nothing here is web-
+reachable unless it is inside `assets.directory`. The one way to break that is
+pointing it at `"./"` as a shortcut, which publishes the repo, `.git` included.
+
+`run_worker_first: true` is load-bearing and not a preference:
+`not_found_handling` resolves unmatched requests to `404.html` *instead of*
+invoking the Worker, so with the default precedence `POST /api/waitlist` would
+be answered by the 404 page and the form would silently never write a row.
+Running the Worker first also lets it own the www redirect, which asset serving
+cannot do.
+
+### The waitlist endpoint
+
+`POST /api/waitlist`, backed by D1. `schema.sql` is one table with `email` as
+the PRIMARY KEY rather than an id plus a UNIQUE index, so a resubmit is an
+`ON CONFLICT DO NOTHING` no-op instead of a duplicate row to clean up.
+
+**It answers identically whether the address was new, already present, or caught
+by the honeypot.** An endpoint that says "already subscribed" is an endpoint
+that answers *is this person on your list* — a question about a real individual
+that no visitor should be able to ask. Counts are available over the CLI or the
+D1 console, where they belong. It accepts both JSON and urlencoded bodies
+because the page is built to work with JavaScript disabled, and a signup form
+that silently does nothing is worse than no form at all.
+
+### How it deploys
+
+Git-connected via **Workers Builds** — push to `main` and Cloudflare runs
+`npx wrangler deploy`. No build step; there is nothing to compile. Local
+`wrangler` was never authenticated on this machine and does not need to be.
+
+**`wrangler.jsonc` is the source of truth, so do not edit bindings in the
+dashboard** — a D1 binding added there is silently overwritten by the next push.
+The dashboard is for *resources* (creating the database, reading logs, running
+SQL) and read-only for *configuration*. This is the one thing about the setup
+that will bite a future change if it is forgotten.
+
+### Sweep, 2026-08-06
+
+```
+/ /privacy /restore              200
+unmatched path                   404, serves 404.html
+www.skrim.app/privacy            301 -> https://skrim.app/privacy (path kept)
+headers on /privacy              nosniff, no-referrer, DENY
+GET  /api/waitlist               405 + Allow: POST
+POST invalid email  (JSON)       400 {"ok":false,"error":"invalid_email"}
+POST invalid email  (form)       303 -> /?invalid=1
+POST honeypot filled             200 {"ok":true}, no row written
+real signup                      row confirmed in D1
+```
+
+`no-referrer` is the header that earns its place rather than being boilerplate:
+the uninstall URL arrives at `/restore` carrying `?n=<count>&at=<timestamp>`,
+and without it any link a reader then clicked would carry that querystring to a
+third party. There is deliberately **no CSP** — every page inlines its own
+`<style>` and `<script>`, so a policy permissive enough to run them needs
+`unsafe-inline`, and a CSP with `unsafe-inline` is decoration. Hashes were the
+alternative and were rejected: they go stale on every content edit, and the
+failure mode is a privacy policy that renders blank for a Chrome reviewer.
 
 ## M2 — how a share becomes a hide
 
@@ -839,7 +990,21 @@ extension/fonts/             Instrument Sans + Geist Mono, self-hosted      (BR)
 extension/icons/             10 PNGs, built by tools/make-icons.mjs         (BR)
 brand/                       the guideline's shipping parts: tokens, logo   (BR)
 tools/make-icons.mjs         rasterises the mark; re-run after a mark change (BR)
+extension.zip                the upload package. Build from INSIDE extension/,
+                             never with Finder — manifest.json must sit at the
+                             archive root or the upload is rejected        (M4)
 site/restore.html            the hosted twin; standalone, no extension      (R)
+site/privacy.html            live at skrim.app/privacy — the listing's link (M4)
+site/index.html              the landing page + waitlist form             (SITE)
+site/404.html                what not_found_handling resolves to          (SITE)
+worker/index.mjs             skrim.app: www->apex, /api/waitlist, headers (SITE)
+                             network code lives HERE and never in extension/
+wrangler.jsonc               the whole site config; source of truth over the
+                             dashboard, which silently loses bindings     (SITE)
+schema.sql                   the waitlist table; email is the primary key (SITE)
+LICENSE                      source-available: audit and build, do not republish
+README.md                    the public front door — leads with the greps that
+                             make the privacy claims checkable
 tools/mock-chrome.mjs        in-memory chrome.* + fault injection
 tools/test-engine.mjs        the suite
 tools/mutate-run.mjs         the shared mutation runner
@@ -856,6 +1021,9 @@ tools/make-store-assets.mjs  the Web Store images, real popup in an iframe
 brand/store/README.md        which file goes in which dashboard field
 M0-FINDINGS.md               sync spike results
 docs/figma-popup.md          the popup design in Figma — and what is missing
+../skrim-gtm/                SEPARATE PRIVATE REPO — pricing, funnel, launch
+                             sequencing. Deliberately not in this one, which is
+                             public and is cloned into a build container
 ```
 
 Test-suite layers: `H-*` hook, `B-*` bridge, `E-*` hook→bookmarks end to end,
