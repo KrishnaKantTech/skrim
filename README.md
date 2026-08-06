@@ -47,10 +47,11 @@ extension user — only someone who typed their address into a form on the websi
 **Claim: nothing is ever permanently deleted.**
 
 ```bash
-node tools/test-engine.mjs     # ~1s, prints a scoreboard, exit 0 = all green
-node tools/mutate-m2.mjs       # proves those tests would catch a regression
-node tools/mutate-recovery.mjs # same, for the crash-recovery layer
-node tools/live-test.mjs       # ~75s, drives a real Chrome
+node tools/test-engine.mjs         # ~1s, prints a scoreboard, exit 0 = all green
+node tools/mutate-m2.mjs           # proves those tests would catch a regression
+node tools/mutate-recovery.mjs     # same, for the crash-recovery layer
+node tools/live-test.mjs           # ~75s, drives a real Chrome
+node tools/store-install-test.mjs  # ~60s, a fresh profile and a store-shaped copy
 ```
 
 Every item Skrim deletes is an item Skrim itself created.
@@ -128,7 +129,7 @@ your other device, Skrim explains what happened and offers to bring the bar back
 | | |
 | --- | --- |
 | `extension/` | The extension. No network code, ever — see above. |
-| `tools/` | The test suite, the mutation testers, and the generators that build the store assets and social covers from the same geometry as the logo. |
+| `tools/` | The test suite, the mutation testers, the two harnesses that drive a real Chrome (`live-test` for the mechanism, `store-install-test` for the shipped shape of it), and the generators that build the store assets and social covers from the same geometry as the logo. |
 | `site/` | skrim.app's pages. `privacy.html` is linked from the store listing; `restore.html` is what a receipt URL resolves to, so it has to keep working for as long as anyone holds one. |
 | `worker/` | The Cloudflare Worker serving skrim.app: host canonicalisation, the waitlist endpoint, security headers. |
 | `brand/` | Logo geometry, tokens, store screenshots, social covers. All generated. |
@@ -156,17 +157,18 @@ for an unpacked one.
 ## Tests
 
 ```
-assertions            284 pass / 0 fail
+assertions            301 pass / 0 fail
 fault inject HIDE      30 repaired / 0 broken
 fault inject RESTORE   41 repaired / 0 broken
-mutations              49 caught / 0 survived
-live (real Chrome)     67 pass / 0 fail
+mutations              54 caught / 0 survived
+live (real Chrome)     71 pass / 0 fail
 1000-item hide         5ms
 ```
 
 Every fix is mutation-tested: revert it in a scratch copy and the suite must go
-red. That check has earned its keep — one fix had no coverage at all until it
-was run.
+red. That check has earned its keep twice now — one fix had no coverage at all
+until it was run, and a later one turned out to be protecting the *dangerous*
+half of a change while three defensive checks around it went untested.
 
 ---
 

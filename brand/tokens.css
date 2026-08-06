@@ -35,8 +35,11 @@
   --ink-200: #DBE0DD;
   --ink-300: #BFC7C2;
   --ink-400: #94A09A;  /* 2.71:1 on white — decorative only in light mode */
-  --ink-500: #6C7873;  /* 4.59:1 on white — the muted-text floor in light mode */
-  --ink-600: #515C57;
+  --ink-500: #6C7873;  /* 4.59:1 on white, but only 4.23:1 on ink-50 and 3.90:1
+                          on ink-100 — clears AA against the PAGE and nothing
+                          else, so it is not a body-text step. See --muted. */
+  --ink-600: #515C57;  /* 6.96:1 on white, 6.41:1 on ink-50, 5.90:1 on ink-100 —
+                          the lightest ink that is readable on every surface */
   --ink-700: #3C4642;
   --ink-800: #28312D;
   --ink-900: #161D1A;
@@ -83,8 +86,13 @@
   --line-strong:   rgba(10, 16, 14, .16);
 
   --text:          var(--ink-950);
-  --muted:         var(--ink-500);
-  --faint:         var(--ink-500);   /* light mode has no step below 500 that clears 4.5:1 */
+  /* Measured on the surface it is USED on, not on the page behind it. Almost
+     every muted string in the popup sits inside a panel -- the facts list, the
+     notices, the pill -- so ink-500's 4.59:1 against white was never the ratio
+     a reader actually got: on ink-50 it is 4.23:1 and on ink-100 3.90:1, both
+     under AA. ink-600 is the lightest step that clears 4.5:1 on all three. */
+  --muted:         var(--ink-600);
+  --faint:         var(--ink-500);   /* non-text only: see the ramp comment */
 
   --accent:        var(--green-400); /* fill */
   --accent-hover:  var(--green-500);

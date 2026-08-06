@@ -58,12 +58,21 @@ screenshots, older branches and the guideline's own history.
 | `--ok` / `--ok-dot` / `--ok-tint` | `--accent-text` / `--accent-dot` / `--accent-tint` | merged into the brand |
 | `--warn` / `--warn-tint` | `--attention` / `--attention-tint` | unchanged in meaning |
 | `--danger` / `--danger-tint` | `--exposed` / `--exposed-tint` | renamed: it flags visibility, not an error |
-| `--faint` | `--muted` | light mode has no step below `ink-500` that clears 4.5:1 |
+| `--faint` | `--muted` | there is no step below `ink-600` that clears 4.5:1 on every light surface |
 | `--r-sm` / `--r-md` / `--r-lg` | `--radius-sm` / `--radius-md` / `--radius-lg` | same values |
 | `--ring` | `--ring` | now two-tone, so it survives on any ground |
 
-Dark mode needs one extra check: `ink-500` reaches only 3.73:1 on `ink-900`, so
-muted text there must use `ink-400`. The two modes do not use the same step.
+Both modes need an extra check, and it is the same one: **measure a text colour
+against the surface it sits on, not against the page behind it.** Almost every
+muted string in the product is inside a panel.
+
+- Light mode: `ink-500` is 4.59:1 on white but 4.23:1 on `ink-50` and 3.90:1 on
+  `ink-100`, so it clears AA against the page and nothing else. `--muted` is
+  therefore `ink-600` (6.96 / 6.41 / 5.90).
+- Dark mode: `ink-500` reaches only 3.73:1 on `ink-900`, so `--muted` is
+  `ink-400` there.
+
+The two modes do not use the same step, and neither uses `ink-500` for type.
 
 Three consequences went further than a rename, and are the parts worth not
 undoing by accident:

@@ -64,6 +64,8 @@ const STRAY_DECOYS_KEY = "secureshare.strayDecoys";
 const MAX_RESTORE_ATTEMPTS = 3;
 // Cosmetic litter should never grow without bound.
 const MAX_STRAYS = 60;
+// An index nothing can reach, so a Math.min(index, len) clamp appends.
+const APPEND = 1e9;
 
 const DECOYS = [
   { title: "Google", url: "https://www.google.com/" },
@@ -73,6 +75,17 @@ const DECOYS = [
   { title: "Maps", url: "https://maps.google.com/" },
   { title: "News", url: "https://news.google.com/" },
 ];
+
+/**
+ * Is this node still one of OUR placeholders?
+ *
+ * Checked by shape at the moment of deletion and never by the id alone: sync
+ * can remap an id onto a bookmark of the user's, and these six are among the
+ * most commonly bookmarked URLs in existence. Every path that deletes a decoy
+ * asks this first, which is why it lives here rather than at each of them.
+ */
+const isDecoyNode = (node) =>
+  !!node && DECOYS.some((d) => d.title === node.title && d.url === node.url);
 
 // ---------------------------------------------------------------------------
 // Serialisation. Two share events can arrive back to back; interleaved moves
@@ -258,7 +271,7 @@ async function sweepStrayDecoysImpl() {
     }
     if (!node) {
       cleared++; // already gone
-    } else if (!DECOYS.some((d) => d.title === node.title && d.url === node.url)) {
+    } else if (!isDecoyNode(node)) {
       cleared++; // id remapped by sync -- leave the real bookmark alone
     } else if (await safeRemoveTree(id)) {
       cleared++;
@@ -286,6 +299,37 @@ async function emptyVault(id) {
   for (const k of kids) await safeRemoveTree(k.id);
   const left = await childrenOrNull(id);
   return left !== null && left.length === 0;
+}
+
+/**
+ * Take the placeholders a receipt names off the bar, by id.
+ *
+ * The sweep needs this where restoreImpl does not: restoreImpl works from a
+ * journal, and a journal only exists while the extension that wrote it does.
+ * An uninstall takes storage.local with it, so after a reinstall the receipt
+ * inside the vault is the ONLY surviving record that six ordinary-looking
+ * bookmarks on the bar are ours to delete.
+ *
+ * Anything that will not go this pass is handed to the stray list rather than
+ * dropped -- housekeeping drains that immediately afterwards, and every hide
+ * drains it again, so a decoy can never be stranded with no record of it.
+ */
+async function removeDecoysById(ids) {
+  const left = [];
+  for (const id of ids ?? []) {
+    let node;
+    try {
+      node = (await chrome.bookmarks.get(id))?.[0] ?? null;
+    } catch {
+      // Unreadable this pass. Only forget it if it is genuinely gone.
+      if (await nodeExists(id)) left.push(id);
+      continue;
+    }
+    if (!node) continue; // already gone
+    if (!isDecoyNode(node)) continue; // id remapped by sync -- not ours
+    if (!(await safeRemoveTree(id))) left.push(id);
+  }
+  await addStrayDecoys(left);
 }
 
 /** Everything that is safe to do on any wake, in any state. */
@@ -398,6 +442,20 @@ export async function sweepOrphanVaults() {
       adopted++; // local-only storage: unreachable by any peer, so it is ours
     }
 
+    // Read the receipt BEFORE anything moves. Draining the vault destroys it,
+    // and on the path that matters here -- a reinstall, where the journal died
+    // with the old installation -- it is the only record of where each item
+    // belongs and which bar items are ours. Trusted for placement only when it
+    // proves it was written on this profile: ids from another machine name
+    // other things here, and a plan built on them would reorder a bar on a
+    // guess. Same test the popup shows the user before asking them.
+    const rec = kids.map((k) => receipt.decode(k.url)).find(Boolean) ?? null;
+    const exact = isLocalReceipt(rec, node);
+
+    // Our placeholders first, so the recorded indices land on a bar that is
+    // the one the receipt described rather than that bar plus six of ours.
+    if (exact) await removeDecoysById((rec.decoys ?? []).map(([id]) => String(id)));
+
     // The receipt is ours, not the user's. Moving it to the bar would hand
     // someone a bookmark titled "drag these back" sitting on the bar it is
     // telling them to drag things onto.
@@ -405,13 +463,22 @@ export async function sweepOrphanVaults() {
     if (real.length > 0) {
       const group = groups.find((g) => g.other.id === node.parentId) ?? groups[0];
       if (!group) continue;
-      // Append: the bar's current length is the only always-valid index.
       const barKids = await childrenOrNull(group.bar.id);
       if (barKids === null) continue;
       let len = barKids.length;
-      for (const k of real) {
+      // With a local receipt every item goes back to the index it left from.
+      // Without one, the bar's current length is the only always-valid index --
+      // order survives, position does not, which is all a receiptless vault can
+      // offer. Anything the receipt does not name is something the user put in
+      // the folder themselves; it gets a home, not one we invented for it.
+      const byId = exact
+        ? new Map(rec.items.map(([itemId, index]) => [String(itemId), index]))
+        : null;
+      const at = (k) => (byId ? byId.get(String(k.id)) ?? APPEND : APPEND);
+      const queue = byId ? [...real].sort((a, b) => at(a) - at(b)) : real;
+      for (const k of queue) {
         try {
-          await bmMove(k.id, { parentId: group.bar.id, index: len });
+          await bmMove(k.id, { parentId: group.bar.id, index: Math.min(at(k), len) });
           len++;
           recovered++;
         } catch { /* one stuck item must not block the rest */ }
@@ -685,7 +752,7 @@ async function restoreImpl({ internal = false } = {}) {
         const node = (await chrome.bookmarks.get(id))?.[0] ?? null;
         if (!node) {
           done = true; // already gone
-        } else if (!DECOYS.some((d) => d.title === node.title && d.url === node.url)) {
+        } else if (!isDecoyNode(node)) {
           done = true; // id remapped by sync -- leave the real bookmark alone
         } else {
           done = await safeRemoveTree(id);
@@ -952,9 +1019,6 @@ export const adoptVault = (id) =>
     // does not -- which is exactly what a pre-receipt vault can offer.
     return { ok: true, exact: false, ...(await housekeeping()) };
   });
-
-// An index nothing can reach, so restoreImpl's Math.min(index, len) appends.
-const APPEND = 1e9;
 
 /**
  * Rebuild a journal from a vault's receipt.

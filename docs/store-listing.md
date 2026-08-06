@@ -224,11 +224,15 @@ All three certification checkboxes: **yes.**
 
 ### Privacy policy URL
 
-`site/privacy.html` is written but not hosted. **The field takes a URL, not a
-file — this blocks submission.** Publish it at `skrim.app/privacy` — that domain
-is bought and is the only one we own — and paste that URL. GitHub Pages, behind
-the domain or on its own, works in the meantime. The contact address inside the
-policy is the developer email until a `skrim.app` mailbox exists.
+```
+https://skrim.app/privacy
+```
+
+Live and serving 200, byte-identical to `site/privacy.html` — the check is
+`diff <(curl -s https://skrim.app/privacy) site/privacy.html`. It publishes the
+same nine **Not collected** answers as the table below, so the listing and the
+policy cannot disagree without that diff failing first. Contact address on the
+page is `support@skrim.app`.
 
 ---
 
@@ -299,10 +303,50 @@ after a crash.
 
 | | Field | State |
 | --- | --- | --- |
-| 1 | Privacy policy URL | Written, unhosted — see above |
+| 1 | ~~Privacy policy URL~~ | **Done** — `https://skrim.app/privacy`, live |
 | 2 | ~~Screenshots (1280×800)~~ | **Done** — five, `brand/store/` |
 | 3 | ~~Small promo tile (440×220)~~ | **Done** — `brand/store/promo-tile-440x220.png` |
-| 4 | Clean-profile walk, no dev mode | Not done — GTM-PLAN "this week" item 5 |
+| 4 | ~~Clean-profile walk, no dev mode~~ | **Done** — see below |
 
-Which leaves two: **a public URL for the privacy policy**, and the clean-profile
-walk. Nothing else on this page is waiting on anything.
+**Nothing is blocking submission.**
+
+### The clean-profile walk, and what it found
+
+Run against a copy of `extension/` with `update_url` injected into the manifest —
+the key Chrome adds for a store install, and the one thing the developer
+disclosure is gated on — in a profile built from scratch. That is the only way to
+exercise what an installed user gets rather than what a developer gets.
+
+It confirmed the disclosure is hidden *and* its handlers unbound, that no
+reachable control can call `recover()`, that the popup, the recovery page and an
+ordinary page's console are all silent, that a hide and restore round-trips the
+bar byte-identically with nothing left in storage, and that a receipt bookmark
+opens and decodes from a real bookmark click.
+
+Four defects came out of it, all fixed:
+
+- **The automatic sweep ignored the receipt.** On a profile whose bar reports
+  `syncing: false` — signed out, or bookmark sync off — a reinstall after an
+  uninstall-while-hidden drained the vault by *appending*, and deleted the
+  receipt unread. Six placeholder bookmarks stayed on the bar permanently and
+  the original layout was lost. `sweepOrphanVaults` now uses the receipt for
+  both, the way `adoptVault` always did. Covered by `RC-4b`–`RC-4e`, and by
+  `RC-k`, `RC-l`, `RC-n`, `RC-o` in `mutate-recovery.mjs`.
+- **The popup exceeded Chrome's 600px cap** when an unowned vault turned up
+  during a live hide, clipping the facts list and the sync note off the bottom.
+  The column is capped and `.body` scrolls; `L2c` measures it, `L2d` guards the
+  recovery page against inheriting the same cap.
+- **"1 bookmark are sitting in a Skrim folder."** Verb and pronoun now agree with
+  the count, in both the popup card and the recovery page. `P-2b`, mutation `SY-k`.
+- **Light-mode muted text was 4.23:1**, under AA. `--muted` was measured against
+  the page but is used inside panels; it is `ink-600` now — 6.41:1 on `ink-50`.
+
+### One thing to decide before submitting
+
+`tabs` makes Chrome show **"Read your browsing history"** on the install prompt.
+It is the scariest line a user sees, on an extension whose whole pitch is
+privacy, and it buys exactly one feature: noticing Loom's capture tab. Moving it
+to `optional_permissions` behind a toggle would drop it from the prompt at the
+cost of Loom coverage until the user opts in. Not a defect and not a blocker —
+but it is a listing decision, not an engineering one, so it is called out here
+rather than settled quietly. See `STATUS.md` § known limits.

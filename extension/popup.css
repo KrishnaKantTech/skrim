@@ -66,9 +66,24 @@
   box-sizing: border-box;
 }
 
+/* Chrome sizes a popup to its content and then stops at 600px, so anything
+ * taller is simply cut off -- and it is the BOTTOM that goes, which is where
+ * the facts list and the sync warning live. Left alone, the popup reached
+ * 739px whenever an unowned vault was found during a live hide: the notice
+ * pushed everything below it off the end, including the one line explaining
+ * that hiding syncs.
+ *
+ * So the height is owned here rather than discovered at 600. The column is
+ * capped, the header stays put, and `.body` is the part that scrolls -- which
+ * keeps the state readout and the primary button reachable no matter how many
+ * notices are stacked above them. Shorter states are unaffected: max-height
+ * only binds when the content would have overflowed anyway. */
 body {
   width: 336px;
+  max-height: 600px;
   margin: 0;
+  display: flex;
+  flex-direction: column;
   background: var(--bg);
   color: var(--text);
   font: 13px/1.45 var(--font-sans);
@@ -98,6 +113,9 @@ body {
   justify-content: space-between;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-5);
+  /* Pinned: the brand and the state pill are the two things that must survive
+   * a popup tall enough to scroll. `.body` is the only part that gives. */
+  flex: none;
 }
 
 /* The scrim rule -- the brand's recurring device, a line that breaks into
@@ -211,6 +229,13 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  /* The scrolling part. `min-height: 0` is what actually allows it to shrink:
+   * a flex item's default `min-height: auto` refuses to go below its content,
+   * which would push the overflow back onto the body and undo the cap above. */
+  overflow-y: auto;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
 }
 
 /* -------------------------------------------------------------- the mark */
@@ -624,6 +649,9 @@ body {
 .dev {
   position: relative;
   border-top: 1px solid var(--line);
+  /* Also pinned. Its one tall child, the response `pre`, caps and scrolls
+   * itself, so this never needs to be the thing that gives. */
+  flex: none;
 }
 
 .dev > summary {

@@ -7,10 +7,19 @@
     <style>
       /* A full page, not the 336px popup: only the layout differs, so the
          tokens, the type and the mark are all inherited from popup.css rather
-         than restated. */
+         than restated.
+
+         Which means every box rule popup.css puts on `body` lands here too, and
+         those are written for a window Chrome refuses to grow past 600px. Both
+         are undone explicitly: this page is as tall as it needs to be and
+         scrolls as a document, and it has no inner scroll region to hand the
+         overflow to. Restating them is the price of sharing the stylesheet, and
+         cheaper than a second copy of the tokens that could drift. */
       body {
         width: auto;
         max-width: 44rem;
+        max-height: none;
+        display: block;
         margin: 0 auto;
         padding: 2.5rem 1.5rem 4rem;
         background: var(--bg);

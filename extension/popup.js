@@ -209,19 +209,27 @@ function render(s, shares, failure) {
     // count is null when the folder would not read back. Saying "0 bookmarks"
     // there would be the exact opposite of the truth.
     const what = typeof p.count === "number" ? plural(p.count, "bookmark") : "Bookmarks";
+    // Every sentence below is built around that count, so the verb and the
+    // pronoun have to agree with it -- "1 bookmark are sitting" is the copy a
+    // user meets at the one moment they are already worried their bookmarks are
+    // gone, which is the worst possible moment to look unfinished. The unknown
+    // count reads as plural, because "Bookmarks" is.
+    const one = p.count === 1;
 
     $("adoptHead").textContent = peer
       ? "Hidden by another device"
       : "Hidden bookmarks found";
     $("adoptDetail").textContent = peer
-      ? `${what} were moved off your bar by Chrome Sync ${when(p.hidAt ?? p.dateAdded)}.`
-      : `${what} are sitting in a Skrim folder created ${when(p.hidAt ?? p.dateAdded)}.`;
+      ? `${what} ${one ? "was" : "were"} moved off your bar by Chrome Sync ${when(p.hidAt ?? p.dateAdded)}.`
+      : `${what} ${one ? "is" : "are"} sitting in a Skrim folder created ${when(p.hidAt ?? p.dateAdded)}.`;
     // Lead with the overwhelmingly likely truth. An empty bar with no
     // explanation is the whole complaint; making the user deduce it from "this
     // folder was not created by this installation" was not an explanation.
     $("adoptOrigin").textContent = p.local
       ? "Hidden on this computer and never put back — most likely a reinstall. " +
-        "They can go back exactly where they were."
+        (one
+          ? "It can go back exactly where it was."
+          : "They can go back exactly where they were.")
       : peer
         ? "Another computer signed into this Chrome profile is screen sharing " +
           "right now, and hiding syncs. Your bar comes back on its own the " +

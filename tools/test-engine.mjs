@@ -915,6 +915,42 @@ async function testPopupExplainsAPeerHideInsteadOfOfferingRecovery() {
   check("P-2 but not knowing is still a reason for the demoted button",
     unknown("adoptBtn").className.includes("btn--quiet") &&
       unknown("adoptCaveat").hidden === false);
+
+  // P-2b every string in this card is assembled around a count, so one hidden
+  // bookmark used to produce "1 bookmark are sitting in a Skrim folder". It is
+  // a small thing that lands at the worst moment there is -- the user is
+  // already looking at an empty bar wondering what happened to their data.
+  const oneOf = (local) => {
+    const s = withVault(local);
+    s.status.pendingAdoption[0].count = 1;
+    return s;
+  };
+  const singularMine = await renderPopup(oneOf(true));
+  check("P-2b one hidden bookmark reads as one bookmark",
+    singularMine("adoptDetail").textContent.startsWith("1 bookmark is sitting"),
+    singularMine("adoptDetail").textContent);
+  check("P-2b and the sentence after it agrees too",
+    /It can go back exactly where it was\./.test(singularMine("adoptOrigin").textContent),
+    singularMine("adoptOrigin").textContent);
+
+  const singularPeer = await renderPopup(oneOf(false));
+  check("P-2b the peer wording agrees as well",
+    singularPeer("adoptDetail").textContent.startsWith("1 bookmark was moved"),
+    singularPeer("adoptDetail").textContent);
+
+  check("P-2b while a dozen still reads as a dozen",
+    peer("adoptDetail").textContent.startsWith("12 bookmarks were moved") &&
+      mine("adoptDetail").textContent.startsWith("12 bookmarks are sitting"),
+    `${peer("adoptDetail").textContent} / ${mine("adoptDetail").textContent}`);
+
+  // A folder that would not read back reports no count at all. "Bookmarks" is
+  // plural, so nothing here may quietly switch it to the singular verb.
+  const noCount = withVault(true);
+  noCount.status.pendingAdoption[0].count = null;
+  const vague = await renderPopup(noCount);
+  check("P-2b an unreadable folder stays plural rather than inventing a number",
+    vague("adoptDetail").textContent.startsWith("Bookmarks are sitting"),
+    vague("adoptDetail").textContent);
 }
 
 // P-3 the developer disclosure. It carries a no-decoy hide, a forced recover and
@@ -2227,6 +2263,149 @@ async function testReinstallToleratesAUserWhoHelped() {
   check("RC-4 and the emptied vault is cleaned up", !mock.nodes.has(vault.id));
 }
 
+// RC-4b the same reinstall, on a profile that does NOT sync -- signed out of
+// Chrome, or bookmark sync switched off. Nothing can reach this storage, so the
+// sweep adopts the vault on its own rather than asking, and the user never sees
+// the recovery page: `recover()` drains it before the install handler can offer
+// one. That automatic path therefore has to be as good as the button, and it
+// was not. It appended the items and deleted the receipt unread, stranding six
+// look-alike bookmarks on the bar permanently and losing the original layout --
+// on the one profile shape that never gets a second chance to fix it.
+//
+// The mock's roots say `syncing: true`, which is why this went unnoticed: every
+// other test in this file takes the branch that asks the user.
+async function testUnsyncedReinstallDrainsExactlyNotApproximately() {
+  const mock = build();
+  mock.nodes.get("1").syncing = false;
+  mock.nodes.get("2").syncing = false;
+  // A managed bookmark mid-bar, as in RC-3: appending the survivors reorders
+  // the bar around anything that cannot move, so this is what tells "exact"
+  // apart from "in the right order".
+  mock.seed("1", { title: "Corp policy", url: "https://c.example/", unmodifiable: "managed" });
+
+  const before = JSON.stringify(mock.snapshot("1"));
+  let engine = await loadEngine(mock);
+  await engine.hide({ decoys: true });
+  const vault = findVault(mock);
+
+  engine = await uninstall(mock);
+  // Exactly what sw.js does on install -- no adoptVault, no popup, no click.
+  await engine.recover({ maxHiddenMs: 0 });
+
+  const titles = mock.nodes.get("1").children.map((c) => mock.nodes.get(c).title);
+  check("RC-4b an unsynced reinstall puts the bar back without being asked",
+    JSON.stringify(mock.snapshot("1")) === before, titles.join(","));
+  check("RC-4b and takes its own decoys with it",
+    !titles.some((t) => ["Google", "Gmail", "Calendar", "Drive", "Maps", "News"].includes(t)),
+    titles.join(","));
+  check("RC-4b the vault and its receipt are gone", !mock.nodes.has(vault.id));
+  check("RC-4b nothing is left waiting for the user",
+    (await engine.pendingAdoptions()).length === 0);
+
+  // A decoy the sweep could not remove must survive as a stray, not vanish
+  // from the record -- that is what keeps the next hide from vaulting it and
+  // handing it back as a bookmark of the user's.
+  const strays = mock.storage.get("secureshare.strayDecoys") ?? [];
+  check("RC-4b and leaves no stray decoy unaccounted for", strays.length === 0,
+    JSON.stringify(strays));
+}
+
+// RC-4c a receiptless vault on the same unsynced profile -- written before
+// receipts existed, or one whose receipt the user deleted. There is nothing to
+// be exact FROM, so appending is correct and the decoys are not ours to name.
+// The point is that the receipt path must not have broken the fallback.
+async function testUnsyncedReinstallWithoutAReceiptStillAppends() {
+  const mock = build();
+  mock.nodes.get("1").syncing = false;
+  mock.nodes.get("2").syncing = false;
+
+  let engine = await loadEngine(mock);
+  await engine.hide({ decoys: false });
+  const vault = findVault(mock);
+  engine = await uninstall(mock);
+
+  for (const id of [...mock.nodes.get(vault.id).children]) {
+    if (isReceiptNode(mock.nodes.get(id))) await mock.api.bookmarks.removeTree(id);
+  }
+  await engine.recover({ maxHiddenMs: 0 });
+
+  const titles = mock.nodes.get("1").children.map((c) => mock.nodes.get(c).title);
+  check("RC-4c a receiptless vault still gives every bookmark back, in order",
+    titles.join(",") === "Work,Headlines,Personal,Reading", titles.join(","));
+  check("RC-4c and is cleaned up afterwards", !mock.nodes.has(vault.id));
+}
+
+/** The receipt node itself, rather than its decoded payload. */
+const receiptNodeOf = (mock, vault) =>
+  vault.children.map((id) => mock.nodes.get(id)).find(isReceiptNode) ?? null;
+
+// RC-4d the sweep deletes bookmarks off the user's bar, so the rule that keeps
+// that safe is the one worth attacking: an id is never authority on its own.
+// Sync can renumber a tree, and the six decoys are among the most commonly
+// bookmarked URLs there are -- so a receipt naming id 7 must not delete id 7
+// when id 7 is now the user's own bookmark. It is re-read and shape-checked at
+// the moment of deletion, which is the only moment that can be checked at.
+async function testSweepNeverDeletesABookmarkTheIdNoLongerNames() {
+  const mock = build();
+  mock.nodes.get("1").syncing = false;
+  mock.nodes.get("2").syncing = false;
+
+  let engine = await loadEngine(mock);
+  await engine.hide({ decoys: true });
+  const vault = findVault(mock);
+  const rec = receiptOf(mock, mock.nodes.get(vault.id));
+  const stolenId = String(rec.decoys[0][0]);
+
+  engine = await uninstall(mock);
+  // That id now names something of the user's -- sync remapped it while this
+  // profile had no extension installed to notice.
+  const impostor = mock.nodes.get(stolenId);
+  impostor.title = "Mum's birthday list";
+  impostor.url = "https://example.com/mum";
+
+  await engine.recover({ maxHiddenMs: 0 });
+
+  const titles = mock.nodes.get("1").children.map((c) => mock.nodes.get(c).title);
+  check("RC-4d a decoy id that now names a real bookmark is left alone",
+    mock.nodes.has(stolenId) && titles.includes("Mum's birthday list"),
+    titles.join(","));
+  check("RC-4d while the five that are still ours are removed",
+    !titles.some((t) => ["Google", "Gmail", "Calendar", "Drive", "Maps", "News"].includes(t)),
+    titles.join(","));
+}
+
+// RC-4e a vault sitting in local-only storage whose receipt was written
+// somewhere else -- a bookmarks HTML export restored by hand, or a synced
+// folder dragged into local Other Bookmarks. Its ids name other things here, so
+// its indices are worthless and its decoy list is not ours to act on. The sweep
+// falls back to appending, exactly as it does for a vault with no receipt.
+async function testSweepIgnoresAReceiptItCannotProveIsLocal() {
+  const mock = build();
+  mock.nodes.get("1").syncing = false;
+  mock.nodes.get("2").syncing = false;
+
+  let engine = await loadEngine(mock);
+  await engine.hide({ decoys: true });
+  const vault = findVault(mock);
+  const node = receiptNodeOf(mock, mock.nodes.get(vault.id));
+  const payload = receiptMod.decode(node.url);
+  // Everything else about it is intact; only the one field that proves origin
+  // now names a vault this profile has never had.
+  node.url = receiptMod.buildUrl({ ...payload, vault: "90210" });
+
+  engine = await uninstall(mock);
+  await engine.recover({ maxHiddenMs: 0 });
+
+  const titles = mock.nodes.get("1").children.map((c) => mock.nodes.get(c).title);
+  check("RC-4e a foreign receipt buys no exactness -- the items are appended",
+    titles.slice(-4).join(",") === "Work,Headlines,Personal,Reading", titles.join(","));
+  check("RC-4e and its decoy list is not treated as permission to delete",
+    titles.filter((t) => ["Google", "Gmail", "Calendar", "Drive", "Maps", "News"].includes(t))
+      .length === 6,
+    titles.join(","));
+  check("RC-4e the vault is still drained and cleaned up", !mock.nodes.has(vault.id));
+}
+
 // RC-5 a vault that arrived over sync from another computer. Its receipt names
 // a vault id that means nothing here, so it must NOT be claimed as local -- the
 // popup's whole decision rests on that flag, and getting it wrong empties a
@@ -2518,6 +2697,10 @@ await testReceiptIsWritten();
 await testUninstalledWhileHiddenIsRecoverable();
 await testReinstallRestoresPositionNotJustOrder();
 await testReinstallToleratesAUserWhoHelped();
+await testUnsyncedReinstallDrainsExactlyNotApproximately();
+await testUnsyncedReinstallWithoutAReceiptStillAppends();
+await testSweepNeverDeletesABookmarkTheIdNoLongerNames();
+await testSweepIgnoresAReceiptItCannotProveIsLocal();
 await testPeerVaultIsNotClaimedAsLocal();
 await testStuckVaultKeepsItsReceipt();
 await testReceiptSurvivesARename();

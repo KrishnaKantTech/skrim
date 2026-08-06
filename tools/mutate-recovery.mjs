@@ -45,6 +45,30 @@ const MUTATIONS = [
     to: "    index: items.indexOf(k),",
   },
   {
+    name: "RC-k  sweep an adopted vault by appending, ignoring its receipt",
+    file: "extension/src/engine.js",
+    from: "      const at = (k) => (byId ? byId.get(String(k.id)) ?? APPEND : APPEND);",
+    to: "      const at = () => APPEND;",
+  },
+  {
+    name: "RC-l  leave the decoys behind when the sweep drains a vault",
+    file: "extension/src/engine.js",
+    from: "    if (exact) await removeDecoysById((rec.decoys ?? []).map(([id]) => String(id)));",
+    to: "    /* mutated: the sweep no longer clears its own placeholders */",
+  },
+  {
+    name: "RC-n  trust a foreign receipt for placement (drop the local-origin gate)",
+    file: "extension/src/engine.js",
+    from: "    const exact = isLocalReceipt(rec, node);",
+    to: "    const exact = !!rec;",
+  },
+  {
+    name: "RC-o  delete decoys by id alone, without re-checking what the id names",
+    file: "extension/src/engine.js",
+    from: "    if (!isDecoyNode(node)) continue; // id remapped by sync -- not ours",
+    to: "    /* mutated: the id is taken as authority */",
+  },
+  {
     name: "RC-g  recognise a receipt by its title alone (so a rename orphans it)",
     file: "extension/src/receipt.js",
     from: "  if (decode(node.url)) return true;\n  return TITLE_MARKS.some",

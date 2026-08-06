@@ -75,6 +75,10 @@ function card(v) {
   el.dataset.origin = v.local ? "mine" : "peer";
 
   const what = typeof v.count === "number" ? plural(v.count, "bookmark") : "Bookmarks";
+  // Agrees with the count, the same way the popup's card does. A page that
+  // exists to reassure someone whose bar is empty cannot afford to read as
+  // though nobody proof-read it.
+  const one = v.count === 1;
   const h = document.createElement("h3");
   h.textContent = v.local
     ? `${what} hidden on this computer`
@@ -83,7 +87,10 @@ function card(v) {
   const meta = document.createElement("p");
   meta.className = "meta";
   meta.textContent = v.local
-    ? `Hidden ${when(v.hidAt ?? v.dateAdded)}. They can go back exactly where they were.`
+    ? `Hidden ${when(v.hidAt ?? v.dateAdded)}. ` +
+      (one
+        ? "It can go back exactly where it was."
+        : "They can go back exactly where they were.")
     : `Created ${when(v.dateAdded)}. If that computer is sharing its screen right now, ` +
       `putting these back will un-hide its bar too. If it is not, this is safe.`;
 

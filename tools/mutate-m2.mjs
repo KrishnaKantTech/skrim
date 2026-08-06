@@ -228,6 +228,12 @@ const MUTATIONS = [
   // difference between "a developer sees this" and "everyone sees this" is one
   // constant that nothing used to check.
   {
+    name: "SY-k  use one plural verb for every count, however many there are",
+    file: "extension/popup.js",
+    from: '      ? `${what} ${one ? "was" : "were"} moved off your bar by Chrome Sync ${when(p.hidAt ?? p.dateAdded)}.`\n      : `${what} ${one ? "is" : "are"} sitting in a Skrim folder created ${when(p.hidAt ?? p.dateAdded)}.`;',
+    to: '      ? `${what} were moved off your bar by Chrome Sync ${when(p.hidAt ?? p.dateAdded)}.`\n      : `${what} are sitting in a Skrim folder created ${when(p.hidAt ?? p.dateAdded)}.`;',
+  },
+  {
     name: "M4-a  ship the developer disclosure to every installed user",
     file: "extension/popup.js",
     from: "const DEV = isUnpackedBuild();",

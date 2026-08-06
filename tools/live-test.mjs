@@ -511,6 +511,78 @@ async function main() {
       "an unpacked copy reports no update_url and keeps its developer controls",
       dev);
 
+    // L2c the popup's height, which Chrome does not negotiate: it sizes the
+    // window to the content and then stops at 600px, cutting off whatever is
+    // below. The bottom is where the facts list and the sync warning are, so
+    // this measures the WORST case -- every optional notice showing at once,
+    // which is reachable the moment an unowned vault turns up during a live
+    // hide -- and requires the layout to absorb it rather than lose it.
+    //
+    // Measured off the real stylesheet in a real engine. The popup fixtures in
+    // test-engine.mjs run against a DOM stub that does no layout, so this is
+    // the only place the question can be asked.
+    const box = await evaluate(cdp, popup.sessionId, `(() => {
+      const ids = ["failure", "adopt", "sinceRow", "syncNote", "dirtyNote"];
+      const h = () => Math.ceil(document.body.getBoundingClientRect().height);
+      const set = (on) => ids.forEach((i) => (document.getElementById(i).hidden = !on.includes(i)));
+      const body = document.querySelector(".body");
+      set([]);
+      const armed = h();
+      set(ids);
+      const worst = h();
+      // Everything below the fold has to be reachable, not merely present.
+      body.scrollTop = body.scrollHeight;
+      const last = document.getElementById("dirtyNote").getBoundingClientRect();
+      const reachable = last.top >= 0 && last.bottom <= window.innerHeight + 1;
+      const headTop = document.querySelector(".head").getBoundingClientRect().top;
+      body.scrollTop = 0;
+      set([]);
+      return JSON.stringify({
+        armed, worst, reachable, headTop,
+        width: Math.ceil(document.body.getBoundingClientRect().width),
+      });
+    })()`);
+    const b = JSON.parse(box);
+    check("L2c", b.width <= 800 && b.worst <= 600,
+      "the popup fits Chrome's 800x600 cap even with every notice showing",
+      `${b.width}x${b.worst}`);
+    check("L2c", b.armed < b.worst,
+      "and still shrinks to its content when there is nothing to say",
+      `${b.armed}px armed`);
+    check("L2c", b.reachable && b.headTop === 0,
+      "the overflow scrolls inside the body, so the header stays and nothing is lost",
+      `headTop=${b.headTop} lastNoticeReachable=${b.reachable}`);
+
+    // L2d recovery.html shares popup.css to keep one copy of the tokens, so it
+    // also inherits every box rule that stylesheet puts on `body` -- including
+    // the 600px cap written for a window Chrome will not grow past. On a full
+    // page that cap is simply wrong, and it clipped the page the first time it
+    // was added. The override lives in recovery.html; this is what notices if
+    // it is ever dropped.
+    const recovery = await openTab(cdp, `chrome-extension://${extId}/recovery.html`);
+    // A target answers before it has committed the navigation, so `readyState`
+    // alone can describe the initial about:blank -- and mid-commit there is a
+    // moment with no `document.body` at all, which turns getComputedStyle into
+    // a throw that takes the whole run with it. Wait for the real document.
+    const ready = await waitUntil(
+      () => evaluate(cdp, recovery.sessionId,
+        `!!document.body && location.href.includes("recovery.html") &&
+         !!document.querySelector(".masthead")`).catch(() => false),
+      10_000,
+    );
+    const rbox = ready
+      ? await evaluate(cdp, recovery.sessionId, `JSON.stringify({
+          maxHeight: getComputedStyle(document.body).maxHeight,
+          display: getComputedStyle(document.body).display,
+          clipped: document.body.scrollHeight >
+                   Math.ceil(document.body.getBoundingClientRect().height) + 1,
+        })`).catch((e) => JSON.stringify({ error: String(e.message) }))
+      : JSON.stringify({ error: "recovery page never rendered" });
+    const r = JSON.parse(rbox);
+    check("L2d", r.maxHeight === "none" && r.display === "block" && !r.clipped,
+      "the recovery page is a full page, not a 600px popup", rbox);
+    await cdp.send("Target.closeTarget", { targetId: recovery.targetId }).catch(() => {});
+
     const isSw = (t) => t.type === "service_worker" && t.url.includes(extId);
     let swTarget = await findTarget(cdp, isSw, 20_000);
     if (!check("L3", swTarget, "extension service worker is running")) throw new Error("no worker");
@@ -591,7 +663,23 @@ async function main() {
       console.log("    got:  " + JSON.stringify(restored.shape));
       console.log("    want: " + JSON.stringify(baseline));
     }
-    const after = await barState(cdp, sw);
+    // waitRestored returns the moment the BAR matches, and the journal is
+    // cleared several statements later -- after the order check, the vault
+    // delete and the housekeeping sweep. So the state read here is sampled
+    // mid-teardown, and reading it once turns an ordering into a coin flip.
+    //
+    // Worse, one legitimate interleaving reads back "hidden" outright: a beat
+    // still in flight when the track ended makes the worker re-assert the hide,
+    // and that hide's reconcile puts the items back with the journal still
+    // saying HIDDEN (restoreImpl skips setState(RESTORING) when internal). The
+    // bar is briefly correct AND the journal briefly says hidden, both true.
+    //
+    // The guarantee is that it settles, so that is what is asserted -- with a
+    // bound, so a journal that never clears still fails.
+    const after = await waitUntil(
+      async () => (await barState(cdp, sw)).state !== "hidden",
+      10_000,
+    ).then(() => barState(cdp, sw));
     check("C2", after.vaultCount === -1 || after.vaultCount === 0, "vault folder cleaned up", `${after.vaultCount}`);
     check("C2b", after.receiptUrl === null, "and took its receipt with it", String(after.receiptUrl));
     check("C3", after.state !== "hidden", "journal left HIDDEN", String(after.state));
