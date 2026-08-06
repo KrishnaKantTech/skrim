@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Get your bookmarks back</title>
+    <style>
+      /* Deliberately one file with nothing external. This page is read by
+         people whose bookmarks bar has just gone empty; it has to render on a
+         bad connection, from a cache, and years after it was written. */
+      :root {
+        color-scheme: light dark;
+        --bg: #fff; --surface: #f5f6f8; --line: rgba(16,18,24,.12);
+        --text: #101218; --muted: #5b6270; --warn: #b45309; --warn-bg: #fff8ec;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #101216; --surface: #181b21; --line: rgba(255,255,255,.14);
+          --text: #e9ebef; --muted: #9ba2ae; --warn: #fbbf24; --warn-bg: rgba(251,191,36,.12);
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0 auto; max-width: 40rem; padding: 3rem 1.25rem 5rem;
+        background: var(--bg); color: var(--text);
+        font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      h1 { font-size: 1.75rem; line-height: 1.2; letter-spacing: -.02em; margin: 0 0 .75rem; }
+      h2 { font-size: 1.05rem; margin: 2.5rem 0 .75rem; }
+      p, li { color: var(--muted); }
+      p.lede { color: var(--text); font-size: 1.05rem; }
+      ol { padding-left: 1.35rem; }
+      li { margin-bottom: .5rem; }
+      strong { color: var(--text); }
+      code { background: var(--surface); border-radius: 5px; padding: .1em .4em; font-size: .9em; }
+      .box {
+        border: 1px solid var(--line); border-radius: 12px;
+        background: var(--surface); padding: 1rem 1.15rem; margin: 1.25rem 0;
+      }
+      .box[data-tone="warn"] { border-color: var(--warn); background: var(--warn-bg); }
+      .box h3 { margin: 0 0 .4rem; font-size: 1rem; color: var(--text); }
+      .box p:last-child { margin-bottom: 0; }
+      ul.decoys { list-style: none; padding: 0; margin: .5rem 0 0; font-size: .92rem; }
+      ul.decoys li { display: flex; gap: .6rem; }
+      ul.decoys code { color: var(--muted); }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <h1>Your bookmarks are safe</h1>
+    <p class="lede">
+      Nothing was ever deleted. While your bar was hidden, every bookmark on it
+      was <strong>moved into a folder</strong> inside <strong>Other
+      bookmarks</strong> — they are still in your browser right now, whether or
+      not the extension is.
+    </p>
+
+    <div class="box" id="receipt" hidden>
+      <h3 id="receiptTitle"></h3>
+      <p id="receiptBody"></p>
+    </div>
+
+    <div class="box" data-tone="warn" id="reinstall" hidden>
+      <h3>The one-click way</h3>
+      <p>
+        Install the extension again and open it. It reads the receipt left
+        inside that folder and puts every bookmark back in its original
+        position, then deletes the folder and the placeholder links. You do not
+        have to do any of the steps below.
+      </p>
+    </div>
+
+    <h2>Or put them back by hand</h2>
+    <p>This works with the extension uninstalled, disabled or broken:</p>
+    <ol>
+      <li>Open the bookmark manager: <code>Ctrl + Shift + O</code> (<code>⌘ + ⌥ + B</code> on a Mac).</li>
+      <li>
+        In the left sidebar, click <strong>Other bookmarks</strong>. Look for a
+        folder whose name begins <em>“hidden while screen sharing”</em>.
+      </li>
+      <li>
+        Open it, select everything except the receipt, and drag it onto your
+        bookmarks bar. <strong>The order inside the folder is the order it was
+        in on your bar</strong>, so dragging the whole selection at once keeps it.
+      </li>
+      <li id="decoyStep">
+        Delete the placeholder links that were put on your bar in their place.
+      </li>
+      <li>Delete the now-empty folder and the receipt inside it.</li>
+    </ol>
+
+    <div class="box" id="decoyBox" hidden>
+      <h3>The placeholder links to delete</h3>
+      <p>These were added to your bar so it did not look suspiciously empty:</p>
+      <ul class="decoys" id="decoys"></ul>
+    </div>
+
+    <p id="nopayload">
+      If you opened this page from the receipt bookmark, it will show what that
+      particular batch contained. Opened any other way, the steps above are all
+      you need.
+    </p>
+
+    <script>
+      // The payload travels in the fragment, which browsers never send to a
+      // server: this page can describe a user's hidden bookmarks precisely
+      // while the host it is served from learns nothing about them.
+      (function () {
+        var TOKEN = "ssr1.";
+
+        function decode(url) {
+          var at = url.indexOf(TOKEN);
+          if (at < 0) return null;
+          try {
+            var b64 = url.slice(at + TOKEN.length).replace(/-/g, "+").replace(/_/g, "/");
+            while (b64.length % 4) b64 += "=";
+            var bin = atob(b64);
+            var bytes = new Uint8Array(bin.length);
+            for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            var payload = JSON.parse(new TextDecoder().decode(bytes));
+            return payload && payload.v === 1 ? payload : null;
+          } catch (e) {
+            return null;
+          }
+        }
+
+        function show(id) { document.getElementById(id).hidden = false; }
+        function text(id, value) { document.getElementById(id).textContent = value; }
+
+        var params = new URLSearchParams(location.search);
+        var payload = decode(location.href);
+
+        // Arriving straight from the uninstall: no payload, but Chrome told us
+        // how much is waiting, which is the number the user actually wants.
+        var count = payload ? payload.items.length : Number(params.get("n")) || 0;
+        var at = payload ? payload.at : Number(params.get("at")) || 0;
+
+        if (count > 0) {
+          show("receipt");
+          text(
+            "receiptTitle",
+            count === 1 ? "1 bookmark is waiting in that folder"
+                        : count + " bookmarks are waiting in that folder"
+          );
+          text(
+            "receiptBody",
+            at
+              ? "They were hidden on " + new Date(at).toLocaleString() +
+                " and never put back. Every one of them is still in your browser."
+              : "Every one of them is still in your browser."
+          );
+          show("reinstall");
+        }
+
+        var decoys = (payload && payload.decoys) || [];
+        if (decoys.length) {
+          show("decoyBox");
+          text("decoyStep", "Delete the " + decoys.length + " placeholder links listed below from your bar.");
+          var ul = document.getElementById("decoys");
+          decoys.forEach(function (d) {
+            var li = document.createElement("li");
+            var name = document.createElement("strong");
+            name.textContent = d[1];
+            var url = document.createElement("code");
+            url.textContent = d[2];
+            li.append(name, url);
+            ul.append(li);
+          });
+        }
+
+        if (payload || params.has("uninstalled")) {
+          document.getElementById("nopayload").hidden = true;
+        }
+      })();
+    </script>
+  </body>
+</html>

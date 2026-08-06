@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Get your bookmarks back — Skrim</title>
+    <link rel="stylesheet" href="popup.css" />
+    <style>
+      /* A full page, not the 336px popup: only the layout differs, so the
+         tokens, the type and the mark are all inherited from popup.css rather
+         than restated. */
+      body {
+        width: auto;
+        max-width: 44rem;
+        margin: 0 auto;
+        padding: 2.5rem 1.5rem 4rem;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.55 var(--font-sans);
+      }
+      h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.03em; margin: 0 0 0.4rem; }
+      h2 { font-size: 0.95rem; font-weight: 650; letter-spacing: -0.015em; margin: 2.25rem 0 0.75rem; }
+      p { margin: 0 0 0.75rem; color: var(--muted); }
+      ol, ul { margin: 0 0 0.75rem; padding-left: 1.25rem; color: var(--muted); }
+      li { margin-bottom: 0.3rem; }
+      code {
+        background: var(--surface-2);
+        border-radius: var(--radius-sm);
+        padding: 0.1em 0.4em;
+        font-family: var(--font-mono);
+        font-size: 0.88em;
+      }
+      /* The wordmark, at the size the full mark is legible at. */
+      .masthead { display: flex; align-items: center; gap: 9px; margin-bottom: 1.75rem; }
+      .masthead .mark { width: 26px; height: 26px; color: var(--accent-text); }
+      .masthead b { font-size: 0.95rem; font-weight: 650; letter-spacing: -0.01em; }
+      .lede { color: var(--text); font-size: 1rem; margin-bottom: 1.5rem; }
+      .card {
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-lg);
+        background: var(--surface);
+        padding: 1.1rem 1.25rem;
+        margin-bottom: 0.9rem;
+      }
+      .card h3 { margin: 0 0 0.35rem; font-size: 1rem; font-weight: 650; }
+      .card .meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.9rem; }
+      /* A peer's vault is a COVERED state, just covered on another computer. */
+      .card[data-origin="peer"] {
+        border-color: color-mix(in srgb, var(--accent-dot) 30%, transparent);
+        background: var(--accent-tint);
+      }
+      /* Restoring is the whole point of this page, so here it IS the green
+         fill -- there is no competing action to out-shout. Ink on green,
+         never white. */
+      button {
+        font: inherit;
+        font-weight: 650;
+        border: 1px solid transparent;
+        border-radius: var(--radius-md);
+        padding: 0.6rem 1.1rem;
+        background: var(--accent);
+        color: var(--on-accent);
+        cursor: pointer;
+        transition: background var(--motion-micro) var(--motion-ease);
+      }
+      button:hover:not(:disabled) { background: var(--accent-hover); }
+      button:active:not(:disabled) { background: var(--accent-active); }
+      button:disabled { opacity: 0.55; cursor: default; }
+      button.quiet {
+        background: transparent;
+        border-color: var(--line-strong);
+        color: var(--text);
+        font-weight: 500;
+      }
+      button.quiet:hover:not(:disabled) { background: var(--surface); }
+      button:focus-visible { outline: none; box-shadow: var(--ring); }
+      .result { margin-top: 0.8rem; font-size: 0.9rem; }
+      .result[data-tone="ok"] { color: var(--accent-text); }
+      .result[data-tone="bad"] { color: var(--exposed); }
+      .decoys { font-family: var(--font-mono); font-size: 0.85rem; }
+      .quietnote { color: var(--muted); font-size: 0.85rem; }
+      .empty { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <svg width="0" height="0" aria-hidden="true" style="position: absolute">
+      <defs>
+        <clipPath id="scrimClip">
+          <rect x="2" y="2" width="28" height="28" rx="6" />
+        </clipPath>
+      </defs>
+    </svg>
+
+    <div class="masthead">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+        <g clip-path="url(#scrimClip)">
+          <rect class="mark__line" x="7.5" y="8.5" width="12" height="3" rx="1.5" />
+          <rect class="mark__line" x="7.5" y="14.5" width="15" height="3" rx="1.5" />
+          <rect class="mark__line" x="7.5" y="20.5" width="10" height="3" rx="1.5" />
+          <rect class="mark__scrim" x="2" y="2" width="28" height="28" />
+        </g>
+        <rect class="mark__edge" x="3.125" y="3.125" width="25.75" height="25.75" rx="4.875" />
+      </svg>
+      <b>Skrim</b>
+    </div>
+
+    <h1>Get your bookmarks back</h1>
+    <p class="lede">
+      Nothing here is ever deleted. When the bar is hidden, every bookmark is
+      moved into a folder inside <strong>Other bookmarks</strong> — so even with
+      this extension gone, they are all still in your browser.
+    </p>
+
+    <h2>Bookmarks waiting to be put back</h2>
+    <div id="vaults"><p class="empty">Looking…</p></div>
+
+    <h2>If you would rather do it by hand</h2>
+    <p>This works with the extension removed, disabled, or broken:</p>
+    <ol>
+      <li>Open the bookmark manager — <code>Ctrl/⌘ + Shift + O</code>.</li>
+      <!-- Both names, and that is not tidiness: a folder written before the
+           product was renamed is still sitting in trees under the old one, and
+           this list is read by people whose extension is already gone. -->
+      <li>
+        Click <strong>Other bookmarks</strong> and look for a folder starting
+        with <em>“Skrim — hidden while screen sharing”</em>. Bookmarks hidden by
+        an older version are under
+        <em>“SecureShare — hidden while screen sharing”</em> instead.
+      </li>
+      <li>
+        Select everything in it and drag it onto your bookmarks bar. The order
+        inside the folder is the order it was in on the bar.
+      </li>
+      <li id="decoyStep">
+        Delete the placeholder links we put on the bar while it was hidden.
+      </li>
+      <li>Delete the now-empty folder.</li>
+    </ol>
+    <p class="quietnote" id="decoyList"></p>
+
+    <h2>Receipt</h2>
+    <p class="quietnote" id="receiptNote">
+      Each hidden batch leaves a bookmark inside its folder recording where every
+      item belongs. It survives this extension being uninstalled, which is what
+      makes an exact restore possible afterwards. Open one and this page reads it.
+    </p>
+
+    <script type="module" src="recovery.js"></script>
+  </body>
+</html>

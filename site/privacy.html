@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Skrim — Privacy Policy</title>
+    <meta
+      name="description"
+      content="Skrim collects nothing. It has no servers, no accounts, no analytics and no network code. This page says exactly what it touches and where that stays."
+    />
+    <style>
+      /* Same discipline as restore.html: one file, nothing external. A privacy
+         policy has to still render when it is read years from now, from a cache,
+         by a Chrome reviewer on a bad connection. No green anywhere on purpose —
+         in the brand, green means "covered", and it does not mean anything here. */
+      :root {
+        color-scheme: light dark;
+        --bg: #fff; --surface: #f5f6f8; --line: rgba(16,18,24,.12);
+        --text: #101218; --muted: #5b6270; --note: #b45309; --note-bg: #fff8ec;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #101216; --surface: #181b21; --line: rgba(255,255,255,.14);
+          --text: #e9ebef; --muted: #9ba2ae; --note: #fbbf24; --note-bg: rgba(251,191,36,.12);
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0 auto; max-width: 44rem; padding: 3rem 1.25rem 5rem;
+        background: var(--bg); color: var(--text);
+        font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      h1 { font-size: 1.75rem; line-height: 1.2; letter-spacing: -.02em; margin: 0 0 .35rem; }
+      h2 { font-size: 1.15rem; margin: 2.75rem 0 .75rem; }
+      h3 { font-size: 1rem; margin: 1.5rem 0 .4rem; }
+      p, li, td, th { color: var(--muted); }
+      p.lede { color: var(--text); font-size: 1.05rem; }
+      p.stamp { color: var(--muted); font-size: .9rem; margin: 0 0 2rem; }
+      ul, ol { padding-left: 1.35rem; }
+      li { margin-bottom: .4rem; }
+      strong { color: var(--text); }
+      a { color: var(--text); }
+      code {
+        background: var(--surface); border-radius: 5px; padding: .1em .4em;
+        font-size: .9em; word-break: break-word;
+      }
+      .box {
+        border: 1px solid var(--line); border-radius: 12px;
+        background: var(--surface); padding: 1rem 1.15rem; margin: 1.5rem 0;
+      }
+      .box[data-tone="note"] { border-color: var(--note); background: var(--note-bg); }
+      .box h3 { margin: 0 0 .4rem; font-size: 1rem; color: var(--text); }
+      .box p:last-child, .box ul:last-child { margin-bottom: 0; }
+      .scroll { overflow-x: auto; margin: 1.25rem 0; }
+      table { border-collapse: collapse; width: 100%; min-width: 32rem; font-size: .94rem; }
+      th, td {
+        text-align: left; vertical-align: top; padding: .6rem .75rem;
+        border-bottom: 1px solid var(--line);
+      }
+      th { color: var(--text); font-weight: 600; white-space: nowrap; }
+      td:first-child { color: var(--text); }
+      table.disclosure { min-width: 26rem; }
+      table.disclosure td:last-child { color: var(--text); white-space: nowrap; }
+      footer {
+        margin-top: 3.5rem; padding-top: 1.25rem; border-top: 1px solid var(--line);
+        font-size: .9rem; color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Skrim — Privacy Policy</h1>
+    <p class="stamp">
+      Effective 6 August 2026. This policy is about the Skrim Chrome extension.
+      The website it is served from, skrim.app, is a different and much shorter
+      story, and has <a href="#website">its own section at the end</a>.
+    </p>
+
+    <p class="lede">
+      Skrim hides your bookmarks bar while you share your screen. It does that
+      entirely inside your own browser. <strong>It has no servers, no accounts,
+      no analytics and no network code at all</strong> — there is nothing for it
+      to send your data to, and no request in it that could send anything.
+    </p>
+
+    <div class="box">
+      <h3>The short version</h3>
+      <ul>
+        <li><strong>We collect nothing.</strong> No personal data, no bookmarks, no browsing history, no page content, no usage statistics, no crash reports.</li>
+        <li><strong>Nothing is transmitted.</strong> The extension makes no network requests of any kind.</li>
+        <li><strong>Nothing is sold or shared.</strong> There is no data to sell, share or hand to a third party.</li>
+        <li><strong>No account, no sign-in, no identifier</strong> is created for you.</li>
+        <li>The small amount of bookkeeping it needs lives in your browser's own storage and is deleted when it is no longer needed — see below.</li>
+      </ul>
+    </div>
+
+    <h2>What Skrim does to your bookmarks</h2>
+    <p>
+      Chrome offers no way to hide the bookmarks bar programmatically, so Skrim
+      hides it by moving what is on it out of sight and putting it back
+      afterwards. In your own bookmark tree, on your own machine:
+    </p>
+    <ol>
+      <li>When a screen share starts, every bookmark on your bar is <strong>moved</strong> into a new folder inside <strong>Other bookmarks</strong> named <em>“Skrim — hidden while screen sharing”</em>.</li>
+      <li>A few <strong>placeholder links</strong> to well-known sites (Google, Gmail, Calendar, Drive, Maps, News) are added to the bar so it does not look conspicuously empty. They are ours, not yours, and they are removed on restore.</li>
+      <li>One <strong>receipt bookmark</strong> is written inside that folder. Its title spells out how to put everything back by hand, and its URL carries the positions needed to do it automatically.</li>
+      <li>When the share ends, every bookmark goes back to its original position, and the folder, the placeholders and the receipt are deleted.</li>
+    </ol>
+    <p>
+      Nothing is ever deleted permanently and nothing is copied out of your
+      browser. If a share, the browser or the machine dies mid-way, the next
+      startup finishes the restore.
+    </p>
+
+    <h2>What is stored, where, and when it goes away</h2>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>What</th><th>Where</th><th>Removed</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Crash-safety journal — bookmark <strong>ids and positions only</strong>, never titles or URLs</td>
+            <td><code>chrome.storage.local</code></td>
+            <td>Cleared as soon as a restore is verified complete</td>
+          </tr>
+          <tr>
+            <td>Ids of folders and placeholder links Skrim created, so it never touches one of yours by mistake</td>
+            <td><code>chrome.storage.local</code></td>
+            <td>Cleared once they have been cleaned up</td>
+          </tr>
+          <tr>
+            <td>Last-failure record — bookmark ids, counts and a timestamp, shown on the recovery screen when a restore could not finish</td>
+            <td><code>chrome.storage.local</code></td>
+            <td>Cleared on the next successful restore</td>
+          </tr>
+          <tr>
+            <td>Live share bookkeeping — which tab and frame is currently sharing, and when it last checked in. No URLs, no page data.</td>
+            <td><code>chrome.storage.session</code></td>
+            <td>Deleted by Chrome when you close the browser</td>
+          </tr>
+          <tr>
+            <td>The receipt bookmark</td>
+            <td>Your bookmark tree, inside the folder above</td>
+            <td>Deleted when your bookmarks are restored</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      Uninstalling the extension makes Chrome delete everything in the first four
+      rows. Your bookmarks are yours and stay where they are.
+    </p>
+
+    <h2>Permissions, and what each one is actually for</h2>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Permission</th><th>Why Skrim needs it</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>bookmarks</code></td>
+            <td>The whole feature. Read what is on the bar, move it into the folder, add the placeholders and the receipt, then move everything back. Bookmarks are read and rearranged in place; they are never copied, uploaded or transmitted.</td>
+          </tr>
+          <tr>
+            <td><code>storage</code></td>
+            <td>Keep the records in the table above, so an interrupted hide can always be repaired. Local to your profile.</td>
+          </tr>
+          <tr>
+            <td><code>alarms</code></td>
+            <td>A once-a-minute watchdog that re-checks a hide or restore really completed. Chrome shuts the extension's background worker down when idle; the alarm is what wakes it to finish the job.</td>
+          </tr>
+          <tr>
+            <td><code>tabs</code></td>
+            <td>Some screen recorders (Loom, for example) capture from a page belonging to <em>their own</em> extension, which Skrim is not allowed to look inside. Skrim matches tab URLs against a short built-in list of those capture pages so it knows a recording has started. The URL is compared in memory and immediately discarded — it is never stored and never sent anywhere. No browsing history is read.</td>
+          </tr>
+          <tr>
+            <td>Scripts on all sites (<code>&lt;all_urls&gt;</code>)</td>
+            <td>Screen sharing can start on any site, so Skrim wraps <code>navigator.mediaDevices.getDisplayMedia</code> on every page to learn <strong>that</strong> a share started and stopped. That is all it does: it does not read, alter or transmit page content, and it adds nothing visible to any page.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>What Skrim never touches</h2>
+    <ul>
+      <li><strong>The share itself.</strong> Skrim never accesses the video or audio of your screen share, never records it, and never sees a single frame of it. It only observes that a share is running.</li>
+      <li><strong>Page content.</strong> No reading, scraping or modifying of the pages you visit. No keystrokes, no form data, no passwords.</li>
+      <li><strong>Browsing history.</strong> Skrim does not request the <code>history</code> permission and cannot read your history.</li>
+      <li><strong>Remote code.</strong> Everything that runs is in the package Chrome installed. Nothing is fetched or evaluated from anywhere else.</li>
+      <li><strong>Advertising, tracking and profiling.</strong> None, in any form.</li>
+    </ul>
+
+    <h2>Chrome Web Store data disclosures</h2>
+    <p>
+      These are the categories Chrome asks every extension to declare. Skrim
+      collects none of them, because it makes no network requests:
+    </p>
+    <div class="scroll">
+      <table class="disclosure">
+        <tbody>
+          <tr><td>Personally identifiable information</td><td>Not collected</td></tr>
+          <tr><td>Health information</td><td>Not collected</td></tr>
+          <tr><td>Financial and payment information</td><td>Not collected</td></tr>
+          <tr><td>Authentication information</td><td>Not collected</td></tr>
+          <tr><td>Personal communications</td><td>Not collected</td></tr>
+          <tr><td>Location</td><td>Not collected</td></tr>
+          <tr><td>Web history</td><td>Not collected</td></tr>
+          <tr><td>User activity</td><td>Not collected</td></tr>
+          <tr><td>Website content</td><td>Not collected</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      Accordingly: Skrim's handling of data is limited to providing the single
+      feature described in its listing; no data is sold or transferred to third
+      parties; none is used for creditworthiness, lending, advertising or
+      profiling; and none is used for any purpose unrelated to hiding and
+      restoring your bookmarks bar.
+    </p>
+
+    <h2>The one thing that does leave your device — and it is Chrome, not Skrim</h2>
+    <div class="box" data-tone="note">
+      <h3>If you have Chrome Sync turned on for bookmarks</h3>
+      <p>
+        Hiding the bar is a bookmark change, and Chrome syncs bookmark changes to
+        your other signed-in devices. So while your bar is hidden here, it is
+        also empty on those devices, and the folder, the receipt and the
+        placeholder links appear in your synced tree. Restoring reverses all of
+        it, and the reversal syncs too.
+      </p>
+      <p>
+        That transfer is performed by Chrome under
+        <a href="https://policies.google.com/privacy">Google's privacy policy</a>,
+        using the sync you already enabled. Skrim never sends your bookmarks
+        anywhere itself. Sharing a single <em>tab</em> avoids the situation
+        entirely — a captured tab cannot show the bookmarks bar, so Skrim brings
+        the bar straight back.
+      </p>
+    </div>
+
+    <h2>The recovery page</h2>
+    <p>
+      The receipt bookmark links to a page that explains how to get your
+      bookmarks back. In the current version that page
+      (<code>recovery.html</code>) is <strong>inside the extension</strong>, so
+      opening it makes no network request at all.
+    </p>
+    <p>
+      The recovery details ride in the part of the URL after the <code>#</code>,
+      which browsers never send to a server. That is deliberate: if a copy of the
+      page is ever hosted on the web, the host still cannot learn anything about
+      your bookmarks from a visit, and the receipt contains no bookmark titles or
+      URLs in the first place — only positions. A hosted copy would see what any
+      website sees from any visit (an IP address and a browser user-agent, in
+      ordinary server logs) and nothing else. Should a hosted page become the
+      default destination, this policy will be updated to say so before it does.
+    </p>
+
+    <h2>Children</h2>
+    <p>
+      Skrim is a general-purpose utility, is not directed at children, and
+      collects no personal information from anyone regardless of age.
+    </p>
+
+    <h2>Your rights</h2>
+    <p>
+      Rights such as access, correction, export and erasure exist to be exercised
+      against data a company holds about you. <strong>The extension gives us
+      nothing to hold</strong> — no database, no log, no account. To remove
+      everything it has ever stored, uninstall it: Chrome deletes its storage
+      with it. If your bookmarks were hidden at that moment, the folder and the
+      receipt stay in your bookmark tree so you can put things back; the
+      <a href="restore.html">recovery instructions</a> cover that case.
+    </p>
+    <p>
+      The single exception is an email address you chose to type into the
+      waitlist form on this website. That we do hold, and
+      <a href="#website">This website</a> below says exactly what it is and how
+      to have it deleted.
+    </p>
+
+    <h2 id="website">This website</h2>
+    <p>
+      Everything above describes the extension, which runs on your own machine
+      and talks to nothing. <strong>skrim.app is an ordinary website and is not
+      the same thing.</strong> It is kept deliberately small, and there are
+      exactly two things about it worth telling you.
+    </p>
+
+    <div class="box" data-tone="note">
+      <h3>The waitlist form</h3>
+      <p>
+        If you type your email address into the form on the front page, we store
+        three things: the address, the date, and which page you sent it from.
+        That is the entire record — no name, no location, no profile. We use it
+        once, to tell you Skrim is out. It is never sold, never shared, and
+        never connected to anything the extension does, because the extension
+        has no way to reach it. Reply to that email or write to the address at
+        the bottom of this page and the row is deleted.
+      </p>
+    </div>
+
+    <p>
+      The site is hosted on Cloudflare, which keeps the ordinary server logs any
+      web host keeps — an IP address, a browser user-agent and a timestamp per
+      request. We do not add anything on top of that: <strong>we set no cookies
+      of our own, and there is no analytics, no tracking script and no
+      advertising pixel on any page here</strong>, this one included. Every page
+      on this site is a single self-contained file, which is why there is
+      nothing for a third party to be loaded from in the first place.
+    </p>
+
+    <h2>Changes</h2>
+    <p>
+      If a future version of Skrim ever collects or transmits anything, this
+      policy will be updated to describe it, with a new effective date, before
+      that version ships. The current version transmits nothing.
+    </p>
+
+    <footer>
+      <p>
+        Questions about this policy, or about anything Skrim does with your data:
+        <a href="mailto:support@skrim.app">support@skrim.app</a>.
+      </p>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "M0 Bookmark Sync Probe (throwaway)",
+  "version": "2.0.0",
+  "description": "Measures bookmark move fan-out and restore fidelity for the SecureShare M0 spike. Safe to delete after use.",
+  "minimum_chrome_version": "134",
+  "permissions": ["bookmarks", "storage"],
+  "host_permissions": ["http://localhost:8765/*"],
+  "background": {
+    "service_worker": "sw.js"
+  },
+  "action": {
+    "default_title": "Run M0 probe (or force-restore)"
+  }
+}

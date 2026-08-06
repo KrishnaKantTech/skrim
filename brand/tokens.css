@@ -1,0 +1,151 @@
+/* Skrim design tokens — brand guidelines v1.0
+ *
+ * Two layers. The ramps are raw material and product code must never reference
+ * them directly; the semantic tokens below them resolve per theme and are what
+ * components use. That indirection is what keeps the contrast guarantees in the
+ * guideline from drifting when a colour is retuned.
+ *
+ * The one rule worth stating up front: green means covered. It is the brand
+ * colour AND the protected state, deliberately fused, so nothing else in the
+ * system is allowed to be green. Attention and exposure have their own hues.
+ *
+ * Ratios in comments are measured WCAG 2.1, not estimated. */
+
+:root {
+  color-scheme: light dark;
+
+  /* ---- ramp: Skrim Green — brand, covered state, protective action ---- */
+  --green-25:  #F2FFF8;
+  --green-50:  #E3FFF0;
+  --green-100: #C2FCDF;
+  --green-200: #8DF7C2;
+  --green-300: #4FEDA0;
+  --green-400: #17DE82;  /* core. fills only — 1.78:1 with white, never type on white */
+  --green-500: #00C36D;
+  --green-600: #00A65C;  /* 3.18:1 on white — floor for dots, rings, other non-text */
+  --green-700: #00854B;  /* 4.71:1 on white — the lightest green usable as body type */
+  --green-800: #0A6740;  /* 6.55:1 on green-50 — type on a green tint */
+  --green-900: #0B5236;
+  --green-950: #032B1D;
+
+  /* ---- ramp: Ink — neutrals, biased green to sit with the brand ---- */
+  --ink-0:   #FFFFFF;
+  --ink-50:  #F4F6F5;
+  --ink-100: #EAEDEB;
+  --ink-200: #DBE0DD;
+  --ink-300: #BFC7C2;
+  --ink-400: #94A09A;  /* 2.71:1 on white — decorative only in light mode */
+  --ink-500: #6C7873;  /* 4.59:1 on white — the muted-text floor in light mode */
+  --ink-600: #515C57;
+  --ink-700: #3C4642;
+  --ink-800: #28312D;
+  --ink-900: #161D1A;
+  --ink-950: #0A100E;  /* core */
+
+  /* ---- ramp: Flare — exposed. a share is live and the bar is still up ---- */
+  --flare-50:  #FFF1EE;
+  --flare-300: #FF9B87;
+  --flare-400: #FF6B52;
+  --flare-500: #F0472C;  /* core. 3.72:1 on white — dots and icons */
+  --flare-600: #D2331B;  /* 4.96:1 on white — type */
+  --flare-700: #A9270F;  /* 6.39:1 on flare-50 — type on its own tint */
+
+  /* ---- ramp: Amber — attention. a restore did not finish ---- */
+  --amber-50:  #FFF8E8;
+  --amber-300: #FFC85C;
+  --amber-400: #FFB020;  /* core. 1.83:1 on white — dark surfaces only */
+  --amber-500: #E8930A;
+  --amber-600: #B26E05;  /* 4.10:1 on white — the floor for a dot in light mode */
+  --amber-700: #8A5504;  /* 6.21:1 on white — type */
+
+  /* ---- shape, space, motion: theme-independent ---- */
+  --radius-sm: 7px;
+  --radius-md: 9px;
+  --radius-lg: 14px;
+  --radius-mark: 18.75%;      /* 6/32 of the mark's width, so it holds at any size */
+
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 14px;
+  --space-5: 16px; --space-6: 22px; --space-7: 32px; --space-8: 48px;
+
+  --motion-micro: 120ms;      /* hover, press, focus, pill colour */
+  --motion-base:  200ms;      /* content swaps, rows, notices */
+  --motion-scrim: 340ms;      /* the hide/restore gesture — the only motion over 200ms */
+  --motion-ease:  cubic-bezier(.2, 0, 0, 1);   /* every transition, no exceptions */
+
+  --font-sans: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* ---- semantic: light ---- */
+  --bg:            var(--ink-0);
+  --surface:       var(--ink-50);
+  --surface-2:     var(--ink-100);
+  --line:          rgba(10, 16, 14, .09);
+  --line-strong:   rgba(10, 16, 14, .16);
+
+  --text:          var(--ink-950);
+  --muted:         var(--ink-500);
+  --faint:         var(--ink-500);   /* light mode has no step below 500 that clears 4.5:1 */
+
+  --accent:        var(--green-400); /* fill */
+  --accent-hover:  var(--green-500);
+  --accent-active: var(--green-600);
+  --accent-text:   var(--green-700); /* green used as type */
+  --accent-dot:    var(--green-600); /* status indicators, non-text 3:1 */
+  --accent-tint:   var(--green-50);
+  --accent-on-tint: var(--green-800);
+  --on-accent:     var(--ink-950);   /* type on a green fill — 10.80:1. NEVER white */
+
+  --exposed:       var(--flare-600);
+  --exposed-dot:   var(--flare-500);
+  --exposed-tint:  var(--flare-50);
+  --exposed-on-tint: var(--flare-700);
+
+  --attention:       var(--amber-700);
+  --attention-dot:   var(--amber-600);
+  --attention-tint:  var(--amber-50);
+  --attention-on-tint: var(--amber-700);
+
+  /* two-tone so the ring survives on any ground it lands on */
+  --ring: 0 0 0 1px var(--bg), 0 0 0 3px var(--green-600);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:          var(--ink-950);
+    --surface:     var(--ink-900);
+    --surface-2:   var(--ink-800);
+    --line:        rgba(255, 255, 255, .09);
+    --line-strong: rgba(255, 255, 255, .18);
+
+    --text:        var(--ink-100);
+    --muted:       var(--ink-400);   /* ink-500 only reaches 3.73:1 here — do not use for text */
+    --faint:       var(--ink-400);
+
+    /* the fill does not change between themes: the brand is one green */
+    --accent:        var(--green-400);
+    --accent-hover:  var(--green-300);
+    --accent-active: var(--green-500);
+    --accent-text:   var(--green-400);
+    --accent-dot:    var(--green-400);
+    --accent-tint:   rgba(23, 222, 130, .12);
+    --accent-on-tint: var(--green-300);
+    --on-accent:     var(--ink-950);
+
+    --exposed:         var(--flare-400);
+    --exposed-dot:     var(--flare-400);
+    --exposed-tint:    rgba(255, 107, 82, .11);
+    --exposed-on-tint: var(--flare-400);
+
+    --attention:         var(--amber-400);
+    --attention-dot:     var(--amber-400);
+    --attention-tint:    rgba(255, 176, 32, .10);
+    --attention-on-tint: var(--amber-400);
+
+    --ring: 0 0 0 1px var(--bg), 0 0 0 3px var(--green-400);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* the scrim stops travelling but the state change must still be visible */
+  :root { --motion-scrim: var(--motion-micro); --motion-base: var(--motion-micro); }
+}

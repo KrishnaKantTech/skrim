@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Skrim</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <!-- `booting` suppresses every transition until the first render has landed;
+       popup.js drops it on the next frame. -->
+  <body class="booting">
+    <!-- One clip for every mark on the page. clipPath is userSpaceOnUse, and
+         both marks share the 32x32 viewBox, so a single definition rounds the
+         scrim's corners wherever it is referenced. -->
+    <svg width="0" height="0" aria-hidden="true" style="position: absolute">
+      <defs>
+        <clipPath id="scrimClip">
+          <rect x="2" y="2" width="28" height="28" rx="6" />
+        </clipPath>
+      </defs>
+    </svg>
+
+    <header class="head">
+      <div class="brand">
+        <!-- The minimal mark: content lines mush below 24px, so under that the
+             brand drops them and keeps the scrim, which is the part that
+             carries the idea anyway. -->
+        <svg class="mark mark--min" viewBox="0 0 32 32" aria-hidden="true">
+          <g clip-path="url(#scrimClip)">
+            <rect class="mark__scrim" x="2" y="2" width="28" height="28" />
+          </g>
+          <rect
+            class="mark__edge mark__edge--min"
+            x="3.3"
+            y="3.3"
+            width="25.4"
+            height="25.4"
+            rx="4.7"
+          />
+        </svg>
+        Skrim
+      </div>
+      <div class="pill" id="pill" data-tone="idle">
+        <span class="pill__dot"></span><span id="pillText">Armed</span>
+      </div>
+    </header>
+
+    <div class="body">
+      <!-- A restore that exhausted its retries. Without this the record was
+           written to storage and nothing could ever read it back. -->
+      <section id="failure" class="notice notice--attention" hidden>
+        <div class="notice__head">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7.8v4.6M12 16.1h.01" />
+          </svg>
+          Last restore did not finish
+        </div>
+        <p id="failureDetail"></p>
+        <!-- "Try again" is a green fill: it is the action that gets the user's
+             bookmarks back where they belong, and the brand reserves the fill
+             for exactly that. -->
+        <div class="notice__actions">
+          <button id="panic" class="btn btn--cover" type="button">
+            Try again
+          </button>
+          <button id="dismissFailure" class="btn btn--ghost" type="button">
+            Dismiss
+          </button>
+        </div>
+      </section>
+
+      <!-- Vaults we refuse to adopt on our own: either ours from before a
+           reinstall, or a synced peer's LIVE hide. Nothing in the tree can tell
+           them apart, and guessing wrong empties someone else's vault onto a
+           shared bar mid-meeting -- so the user decides. -->
+      <section id="adopt" class="notice notice--attention" data-origin="mine" hidden>
+        <div class="notice__head">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6.5 3.2h11a1 1 0 0 1 1 1v16.6L12 17l-6.5 3.8V4.2a1 1 0 0 1 1-1Z" />
+          </svg>
+          <span id="adoptHead">Hidden bookmarks found</span>
+        </div>
+        <p id="adoptDetail"></p>
+        <p id="adoptOrigin"></p>
+        <!-- On any vault we cannot prove was written here, and only next to the
+             button it is about: restoring syncs the bookmarks back onto the bar
+             another machine may be presenting from, and a restore is never
+             re-hidden. Worded for both cases -- a known peer hide and an origin
+             we simply cannot determine. -->
+        <p id="adoptCaveat" class="notice__caveat" hidden>
+          Only do this if no other computer on this profile is sharing right now
+          — mid-share it puts that machine's bookmarks on the call.
+        </p>
+        <div class="notice__actions">
+          <button id="adoptBtn" class="btn btn--ghost" type="button">
+            Restore them to my bar
+          </button>
+          <button id="adoptMore" class="btn btn--ghost" type="button">
+            More options
+          </button>
+        </div>
+      </section>
+
+      <section class="hero" id="hero" data-tone="armed" role="status" aria-live="polite">
+        <!-- The mark IS the state readout: the scrim sits at 41% while armed,
+             slides to 100% once the bar is clear, and retracts to 0 with every
+             line at full strength when a share is live and the bar is still up.
+             Shape carries the state so colour never has to carry it alone. -->
+        <div class="hero__badge">
+          <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+            <g clip-path="url(#scrimClip)">
+              <rect class="mark__line" x="7.5" y="8.5" width="12" height="3" rx="1.5" />
+              <rect class="mark__line" x="7.5" y="14.5" width="15" height="3" rx="1.5" />
+              <rect class="mark__line" x="7.5" y="20.5" width="10" height="3" rx="1.5" />
+              <rect class="mark__scrim" x="2" y="2" width="28" height="28" />
+            </g>
+            <rect
+              class="mark__edge"
+              x="3.125"
+              y="3.125"
+              width="25.75"
+              height="25.75"
+              rx="4.875"
+            />
+          </svg>
+        </div>
+        <h1 class="hero__title" id="heroTitle">Checking…</h1>
+        <p class="hero__sub" id="heroSub">Reading the state of your bookmarks bar.</p>
+      </section>
+
+      <button class="btn btn--primary" id="primary" type="button" disabled>
+        <span class="btn__spin" aria-hidden="true"></span>
+        <span id="primaryLabel">Hide bookmarks</span>
+      </button>
+
+      <dl class="facts">
+        <div class="row"><dt>Screen sharing</dt><dd id="sharing">—</dd></div>
+        <div class="row"><dt>Tucked away</dt><dd id="count">—</dd></div>
+        <div class="row"><dt>On your bar</dt><dd id="bars">—</dd></div>
+        <div class="row" id="sinceRow" hidden>
+          <dt>Hidden for</dt><dd id="since">—</dd>
+        </div>
+      </dl>
+
+      <p class="note" id="syncNote" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4.5 11.4a7.5 7.5 0 0 1 12.8-5.3l2.2 2.1M19.5 12.6a7.5 7.5 0 0 1-12.8 5.3l-2.2-2.1" />
+          <path d="M19.5 4.6v3.6h-3.6M4.5 19.4v-3.6h3.6" />
+        </svg>
+        <span
+          >Hiding syncs. Your bar stays empty on every signed-in device until you
+          restore.</span
+        >
+      </p>
+
+      <!-- The tree moved under a live hide, so restore can no longer trust its
+           journalled indexes and will append instead. Cosmetic, but silently
+           reordering someone's bar is exactly the kind of surprise this popup
+           exists to prevent. -->
+      <p class="note" id="dirtyNote" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7.9v4.6M12 16h.01" />
+        </svg>
+        <span
+          >Your bookmarks changed while hidden. Everything comes back, but the
+          original order on the bar may not.</span
+        >
+      </p>
+    </div>
+
+    <!-- A developer affordance, not a product one: a no-decoy hide, a forced
+         recover and the raw worker reply. Default OFF, and popup.js unhides it
+         only on a copy that did not come from the Web Store. The attribute is
+         the fail-safe rather than the mechanism -- if the script never runs, or
+         throws before the gate, an installed user still never reaches
+         Force restore. -->
+    <details class="dev" id="dev" hidden>
+      <summary>
+        <svg class="chev" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m9 5 7 7-7 7" />
+        </svg>
+        Developer
+      </summary>
+      <div class="dev__body">
+        <div class="dev__row">
+          <button id="hide" class="btn btn--ghost" type="button">Hide</button>
+          <button id="hideNoDecoy" class="btn btn--ghost" type="button">
+            Hide (no decoys)
+          </button>
+          <button id="restore" class="btn btn--ghost" type="button">Restore</button>
+          <button id="forceRestore" class="btn btn--ghost btn--flare" type="button">
+            Force restore
+          </button>
+        </div>
+        <div class="dev__label">
+          <span>Last response</span>
+          <button id="copyOut" class="btn btn--ghost" type="button">Copy</button>
+        </div>
+        <pre id="out">ready</pre>
+      </div>
+    </details>
+
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>

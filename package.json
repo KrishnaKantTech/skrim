@@ -1,0 +1,17 @@
+{
+  "name": "skrim-site",
+  "version": "0.1.0",
+  "private": true,
+  "description": "skrim.app — the privacy policy, the recovery page, and the waitlist. Not the extension.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "wrangler deploy --dry-run",
+    "db:schema": "wrangler d1 execute skrim-waitlist --remote --file=./schema.sql",
+    "db:list": "wrangler d1 execute skrim-waitlist --remote --command=\"SELECT email, datetime(created_at,'unixepoch') AS joined, source FROM waitlist ORDER BY created_at DESC\"",
+    "db:count": "wrangler d1 execute skrim-waitlist --remote --command=\"SELECT count(*) AS total FROM waitlist\""
+  },
+  "devDependencies": {
+    "wrangler": "^4.119.0"
+  }
+}

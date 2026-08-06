@@ -1,0 +1,727 @@
+/* Skrim popup.
+ *
+ * One question this UI has to answer in under a second, mid-meeting: are my
+ * bookmarks on the bar right now, or not? Everything else -- counts, the
+ * developer controls -- is secondary and is laid out that way.
+ *
+ * The brand rule decides the whole palette: GREEN MEANS COVERED. It is the
+ * brand colour and the protected state fused on purpose, so nothing else in
+ * here is allowed to be green, and a green FILL only ever moves the user
+ * towards cover -- "Hide bookmarks", "Hide now", "Try again". The one action
+ * that lifts the scrim, restore, is a quiet outline button: still the only
+ * button in the body, never the brightest thing on screen.
+ *
+ * Colour is never the only carrier either. Roughly 1 in 12 men cannot separate
+ * our green from our flare, and covered-vs-exposed is the distinction this
+ * product exists to make -- so the mark changes SHAPE (the scrim slides down
+ * over it), the pill carries a word, and the headline says which state you are
+ * in. Any one of the three read alone still answers the question. */
+
+/* Tokens are a verbatim copy of ../brand/tokens.css -- the extension has to
+ * ship its own, and there is no build step to generate it. `diff
+ * brand/tokens.css extension/tokens.css` is the whole sync check. */
+@import url("tokens.css");
+
+/* ------------------------------------------------------------------ fonts */
+
+/* Packaged, not linked: the extension CSP blocks a font CDN outright. The
+ * latin/latin-ext split is Google's own, so the 11KB accent file only loads
+ * for a tree that actually contains accented titles.
+ *
+ * `block` rather than `swap` because these files are local and land in single
+ * -digit milliseconds -- the block period is never perceived, whereas swapping
+ * would reflow a 336px popup under the user's cursor. */
+
+@font-face {
+  font-family: "Instrument Sans";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: block;
+  src: url("fonts/InstrumentSans-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Instrument Sans";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: block;
+  src: url("fonts/InstrumentSans-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("fonts/GeistMono.woff2") format("woff2");
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 336px;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+::selection {
+  background: var(--green-400);
+  color: var(--ink-950);
+}
+
+/* Anything a user might compare, copy or watch tick. Tabular so a changing
+ * count does not shift the column it sits in. */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* ---------------------------------------------------------------- header */
+
+.head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+}
+
+/* The scrim rule -- the brand's recurring device, a line that breaks into
+ * three shortening dashes as it runs out. Drawn as four gradients on one
+ * element so the header keeps a single box. */
+.head::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 1px;
+  pointer-events: none;
+  background-image: linear-gradient(var(--line-strong), var(--line-strong)),
+    linear-gradient(var(--line-strong), var(--line-strong)),
+    linear-gradient(var(--line-strong), var(--line-strong)),
+    linear-gradient(var(--line), var(--line));
+  background-repeat: no-repeat;
+  background-size: 5px 1px, 14px 1px, 34px 1px, calc(100% - 71px) 1px;
+  background-position: right 0 top 0, right 11px top 0, right 31px top 0,
+    left 0 top 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.brand .mark {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  color: var(--accent-text);
+}
+
+/* Live indicator. The dot only pulses while something is actually sharing --
+ * an idle animation would train the eye to ignore the one that matters. */
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px 3px 7px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--surface);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--muted);
+  white-space: nowrap;
+  /* "Sharing · 1" -> "Sharing · 2" must not resize the chip. */
+  font-variant-numeric: tabular-nums;
+  transition: background var(--motion-micro) var(--motion-ease),
+    color var(--motion-micro) var(--motion-ease),
+    border-color var(--motion-micro) var(--motion-ease);
+}
+
+.pill__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
+}
+
+/* Sharing while the bar is already clear is the state this product is FOR, so
+ * it is green -- not an alarm. Only sharing with the bar still up is flare. */
+.pill[data-tone="covered"] {
+  background: var(--accent-tint);
+  color: var(--accent-on-tint);
+  border-color: color-mix(in srgb, var(--accent-dot) 22%, transparent);
+}
+
+.pill[data-tone="covered"] .pill__dot {
+  background: var(--accent-dot);
+}
+
+.pill[data-tone="exposed"] {
+  background: var(--exposed-tint);
+  color: var(--exposed);
+  border-color: color-mix(in srgb, var(--exposed-dot) 24%, transparent);
+}
+
+.pill[data-tone="exposed"] .pill__dot {
+  background: var(--exposed-dot);
+  animation: pulse 1.8s var(--motion-ease) infinite;
+}
+
+.pill[data-tone="off"] {
+  color: var(--muted);
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--exposed-dot) 55%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+/* ------------------------------------------------------------------ body */
+
+.body {
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* -------------------------------------------------------------- the mark */
+
+/* The logo is the state display. Same geometry as brand/logo/state-*.svg --
+ * a 32px grid, 6px corner, three content lines, and a scrim that covers the
+ * top 41% at rest. Armed slides it to 41%, hidden to 100%, exposed to 0 and
+ * puts every line at full strength. Shape first, colour second. */
+.mark {
+  display: block;
+  overflow: visible;
+}
+
+/* Opening the popup is not a state change. The markup starts on `armed` and
+ * the first render corrects it, so without this every open would replay the
+ * scrim sliding down -- animating a hide that happened ten minutes ago, and
+ * making the popup look like it was still deciding. The first paint lands
+ * instantly and motion is armed straight after, which is what leaves the
+ * gesture for the moment it means something: a share starting while the popup
+ * is open. */
+.booting .mark__scrim,
+.booting .mark__line,
+.booting .hero__badge,
+.booting .pill,
+.booting .btn {
+  transition: none;
+}
+
+.mark__line {
+  fill: currentColor;
+  opacity: 0.5;
+  transition: opacity var(--motion-base) var(--motion-ease);
+}
+
+.mark__scrim {
+  fill: currentColor;
+  transform-box: fill-box;
+  transform-origin: top;
+  transform: scaleY(0.41);
+  transition: transform var(--motion-scrim) var(--motion-ease);
+}
+
+.mark__edge {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.25;
+}
+
+/* Below 24px the content lines mush together, so the minimal cut drops them
+ * and thickens the edge to hold its weight. Matches brand/logo/mark-min.svg. */
+.mark--min .mark__edge--min {
+  stroke-width: 2.6;
+}
+
+[data-tone="shielded"] .mark__scrim {
+  transform: scaleY(1);
+}
+
+[data-tone="exposed"] .mark__scrim {
+  transform: scaleY(0);
+}
+
+/* Nothing is covering them, and that is the whole message. */
+[data-tone="exposed"] .mark__line {
+  opacity: 1;
+}
+
+/* -------------------------------------------------------------- the hero */
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 3px;
+  padding: 2px 0;
+}
+
+.hero__badge {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  margin-bottom: 9px;
+  background: var(--surface);
+  color: var(--muted);
+  transition: background var(--motion-base) var(--motion-ease),
+    color var(--motion-base) var(--motion-ease);
+}
+
+.hero .mark {
+  width: 27px;
+  height: 27px;
+}
+
+/* Armed is a quiet green -- the guard is up, nothing is covered yet. */
+.hero[data-tone="armed"] .hero__badge {
+  background: var(--accent-tint);
+  color: var(--accent-text);
+}
+
+/* Covered. The only solid green fill in the popup that is not a button, and
+ * the loudest the UI ever gets about a state being GOOD. */
+.hero[data-tone="shielded"] .hero__badge {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.hero[data-tone="exposed"] .hero__badge {
+  background: var(--exposed-tint);
+  color: var(--exposed);
+}
+
+.hero[data-tone="busy"] .hero__badge {
+  animation: breathe 1.4s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.hero__title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.hero__sub {
+  margin: 0;
+  max-width: 27ch;
+  font-size: 12.5px;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+
+/* --------------------------------------------------------------- buttons */
+
+.btn {
+  font: inherit;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: background var(--motion-micro) var(--motion-ease),
+    border-color var(--motion-micro) var(--motion-ease),
+    color var(--motion-micro) var(--motion-ease),
+    opacity var(--motion-micro) var(--motion-ease), transform 60ms
+      var(--motion-ease);
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.988);
+}
+
+.btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.btn--primary {
+  width: 100%;
+  height: 40px;
+  font-size: 13.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+/* The cover-ward action -- "Hide bookmarks", "Hide now". Green fill, ink type:
+ * white on green-400 measures 1.78:1 and fails outright, ink measures 10.80:1.
+ * This is also why the exposed state does NOT get a red button: flare marks
+ * the state you are in, green marks the way out of it. */
+.btn--primary[data-action="hide"],
+.btn--cover {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: transparent;
+}
+
+.btn--primary[data-action="hide"]:hover:not(:disabled),
+.btn--cover:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.btn--primary[data-action="hide"]:active:not(:disabled),
+.btn--cover:active:not(:disabled) {
+  background: var(--accent-active);
+}
+
+/* Restore lifts the scrim, so it is deliberately the quiet one: full width and
+ * unmissable, but never competing with a green fill for the eye. */
+.btn--primary[data-action="restore"],
+.btn--primary:disabled {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.btn--primary[data-action="restore"]:hover:not(:disabled) {
+  background: var(--surface);
+  border-color: var(--muted);
+}
+
+.btn--ghost {
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  background: transparent;
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.btn--cover {
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Flare on a control, not a state -- and only where pressing it can put
+ * bookmarks back onto a bar something else is presenting from. That is an
+ * exposure risk, which is exactly what this hue is for. */
+.btn--flare {
+  color: var(--exposed);
+  border-color: color-mix(in srgb, var(--exposed-dot) 40%, transparent);
+}
+
+.btn--flare:hover:not(:disabled) {
+  background: var(--exposed-tint);
+}
+
+/* Spinner rides inside the primary button during hide/restore. */
+.btn__spin {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  animation: spin 0.65s linear infinite;
+}
+
+.btn:not([data-busy]) .btn__spin {
+  display: none;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* ----------------------------------------------------------- fact readout */
+
+.facts {
+  margin: 0;
+  padding: 0 var(--space-3);
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+}
+
+.facts .row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 8px 0;
+  font-size: 12.5px;
+}
+
+.facts .row + .row {
+  border-top: 1px solid var(--line);
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+  text-align: right;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+/* A hide is not local: it empties the bar on every signed-in device. Saying so
+ * is the difference between a confident restore and a panicked one. */
+.note {
+  display: flex;
+  gap: 7px;
+  padding: 0 2px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.note svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  margin-top: 1px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* --------------------------------------------------------------- notices */
+
+.notice {
+  border: 1px solid;
+  border-radius: var(--radius-lg);
+  padding: 11px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.notice__head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.notice__head svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.notice p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+
+.notice__actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+/* Amber is attention, and the token set defines it in exactly these words: a
+ * restore did not finish. It is not flare -- flare means a share is live and
+ * the bar is still up, which is a different sentence about a different risk. */
+.notice--attention {
+  border-color: color-mix(in srgb, var(--attention-dot) 34%, transparent);
+  background: var(--attention-tint);
+}
+
+.notice--attention .notice__head {
+  color: var(--attention);
+}
+
+/* A peer's live hide is not a fault to fix -- it is this machine's half of a
+   screen share happening somewhere else, and it clears itself when that share
+   ends. Amber would send the user hunting for a problem, and the one action it
+   would hurry them into is the one that puts the other machine's bookmarks on
+   its call. It is a COVERED state, just covered on another computer, so it
+   takes the covered colour. The button that undoes it is de-emphasised below
+   rather than removed: it is still the only way out if that machine crashed or
+   was uninstalled mid-share. */
+.notice--attention[data-origin="peer"] {
+  border-color: color-mix(in srgb, var(--accent-dot) 30%, transparent);
+  background: var(--accent-tint);
+}
+
+.notice--attention[data-origin="peer"] .notice__head {
+  color: var(--accent-on-tint);
+}
+
+.notice__caveat {
+  font-size: 11.5px;
+  opacity: 0.85;
+}
+
+.btn--quiet {
+  color: var(--muted);
+  border-color: var(--line);
+  font-weight: 400;
+}
+
+/* ------------------------------------------------------------- developer */
+
+.dev {
+  position: relative;
+  border-top: 1px solid var(--line);
+}
+
+.dev > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px var(--space-5);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  user-select: none;
+}
+
+.dev > summary::-webkit-details-marker {
+  display: none;
+}
+
+.dev > summary:hover {
+  color: var(--text);
+}
+
+.dev > summary:focus-visible {
+  outline: none;
+  box-shadow: inset var(--ring);
+}
+
+.chev {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform var(--motion-base) var(--motion-ease);
+}
+
+.dev[open] .chev {
+  transform: rotate(90deg);
+}
+
+.dev__body {
+  padding: 0 var(--space-5) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.dev__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dev__label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Developer output is the definition of "countable": ids, counts, timings. */
+pre {
+  margin: 0;
+  padding: 9px 10px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  max-height: 168px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* The token file already collapses --motion-scrim and --motion-base to the
+ * micro duration here, so the scrim stops travelling while the state change
+ * stays visible. This is the belt-and-braces for anything animating on a
+ * keyframe rather than a token. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Not found — Skrim</title>
+    <style>
+      /* One file, nothing external -- the same rule the other three pages
+         follow. This one especially: a 404 that depends on a stylesheet which
+         is also 404ing is a page that renders as nothing at all. */
+      :root {
+        color-scheme: light dark;
+        --bg: #fff; --text: #0a100e; --muted: #6c7873; --accent-text: #00854b;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg: #0a100e; --text: #eaedeb; --muted: #94a09a; --accent-text: #17de82; }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; min-height: 100vh;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 0.75rem; padding: 2rem 1.25rem; text-align: center;
+        background: var(--bg); color: var(--text);
+        font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      svg { display: block; width: 40px; height: 40px; margin-bottom: 0.5rem; }
+      h1 { font-size: 1.4rem; letter-spacing: -0.02em; margin: 0; }
+      p { margin: 0; color: var(--muted); max-width: 26rem; }
+      nav { margin-top: 1rem; display: flex; gap: 1.25rem; font-size: 0.9rem; }
+      a { color: var(--accent-text); text-underline-offset: 2px; }
+    </style>
+  </head>
+  <body>
+    <svg viewBox="0 0 32 32" aria-hidden="true">
+      <defs><clipPath id="c"><rect x="2" y="2" width="28" height="28" rx="6" /></clipPath></defs>
+      <rect x="2" y="2" width="28" height="28" rx="6" fill="#0A100E" />
+      <rect x="7.5" y="14.5" width="15" height="3" rx="1.5" fill="#17DE82" opacity=".5" />
+      <rect x="7.5" y="20.5" width="10" height="3" rx="1.5" fill="#17DE82" opacity=".5" />
+      <g clip-path="url(#c)"><rect x="2" y="2" width="28" height="11.5" fill="#17DE82" /></g>
+    </svg>
+    <h1>There is nothing here</h1>
+    <p>
+      If you were sent here by a bookmark that says your bar was hidden, the
+      page you want is the recovery one.
+    </p>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/restore">Get your bookmarks back</a>
+      <a href="/privacy">Privacy</a>
+    </nav>
+  </body>
+</html>

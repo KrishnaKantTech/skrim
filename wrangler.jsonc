@@ -1,0 +1,57 @@
+{
+  // skrim.app -- the website, not the extension.
+  //
+  // Two of the URLs this serves are effectively permanent and must never move:
+  //
+  //   /privacy   goes in the Chrome Web Store listing
+  //   /restore   is what receipt.js RECOVERY_BASE will point at once it is set,
+  //              and a receipt URL is written INTO the user's bookmark tree --
+  //              it syncs to their other devices and outlives an uninstall, so
+  //              it has to resolve for as long as anyone holds one
+  //
+  // `assets.directory` is ./site, which is the same directory the repo keeps
+  // those two pages in. Deliberately no copy step and no build output: a copy
+  // is a thing that drifts, and site/restore.html is the exact file RC-7
+  // asserts the extension's encoder against.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "skrim-site",
+  "main": "worker/index.mjs",
+  "compatibility_date": "2026-08-06",
+
+  "assets": {
+    "directory": "./site",
+    "binding": "ASSETS",
+
+    // Serves /privacy from privacy.html and /restore from restore.html with no
+    // renaming -- `auto-trailing-slash` is the default and is what we want.
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page",
+
+    // The Worker runs BEFORE assets are consulted. This is load-bearing:
+    // not_found_handling resolves unmatched requests to 404.html *instead of*
+    // invoking the Worker, so with the default precedence POST /api/waitlist
+    // would be answered by the 404 page and the form would silently never
+    // write a row. Running the Worker first also lets it own the www redirect,
+    // which asset serving cannot do.
+    "run_worker_first": true
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "skrim-waitlist",
+      "database_id": "PLACEHOLDER_FILLED_BY_D1_CREATE"
+    }
+  ],
+
+  // Cloudflare provisions the DNS record and the certificate for both. www
+  // redirects to the apex in the Worker so there is exactly one canonical
+  // origin -- which matters because the store listing and, later, the receipts
+  // all hard-code it.
+  "routes": [
+    { "pattern": "skrim.app", "custom_domain": true },
+    { "pattern": "www.skrim.app", "custom_domain": true }
+  ],
+
+  "observability": { "enabled": true }
+}

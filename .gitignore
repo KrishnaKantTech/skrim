@@ -1,0 +1,29 @@
+# Chrome test profiles (huge, regenerable)
+.test-chrome/
+.test-chrome-auto/
+
+# Bookmark snapshots — real personal bookmark data, never commit
+snapshots/*.json
+snapshots/*.jsonl
+snapshots/*.log
+
+# Logs
+*.log
+
+# macOS
+.DS_Store
+
+# Node
+node_modules/
+
+# Build artifact — regenerable, and the licence does not permit redistributing
+# a ready-to-load package. Build it yourself from extension/ instead.
+extension.zip
+
+# Wrangler local state — holds the LOCAL D1 sqlite, which after any `wrangler
+# dev` session contains real email addresses typed into the waitlist form.
+# Same reasoning as snapshots/ above: regenerable, and personal data either way.
+.wrangler/
+
+# Claude local settings
+.claude/settings.local.json
