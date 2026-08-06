@@ -27,3 +27,10 @@ extension.zip
 
 # Claude local settings
 .claude/settings.local.json
+
+# Terminal session dumps (2026-08-06-140729-...txt / .txtdec). Verbatim
+# transcripts of working sessions, already observed to contain pricing and GTM
+# discussion -- the exact material this repo is kept clear of on purpose.
+# Anchored to the root, which is where they land.
+/20??-??-??-*.txt
+/20??-??-??-*.txtdec
