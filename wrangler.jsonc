@@ -17,16 +17,13 @@
   "name": "skrim-site",
   "main": "worker/index.mjs",
   "compatibility_date": "2026-08-06",
-
   "assets": {
     "directory": "./site",
     "binding": "ASSETS",
-
     // Serves /privacy from privacy.html and /restore from restore.html with no
     // renaming -- `auto-trailing-slash` is the default and is what we want.
     "html_handling": "auto-trailing-slash",
     "not_found_handling": "404-page",
-
     // The Worker runs BEFORE assets are consulted. This is load-bearing:
     // not_found_handling resolves unmatched requests to 404.html *instead of*
     // invoking the Worker, so with the default precedence POST /api/waitlist
@@ -35,23 +32,28 @@
     // which asset serving cannot do.
     "run_worker_first": true
   },
-
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "skrim-waitlist",
-      "database_id": "PLACEHOLDER_FILLED_BY_D1_CREATE"
+      "database_id": "b2388523-885e-4cf7-956e-4ff4196c67e8"
     }
   ],
-
   // Cloudflare provisions the DNS record and the certificate for both. www
   // redirects to the apex in the Worker so there is exactly one canonical
   // origin -- which matters because the store listing and, later, the receipts
   // all hard-code it.
   "routes": [
-    { "pattern": "skrim.app", "custom_domain": true },
-    { "pattern": "www.skrim.app", "custom_domain": true }
+    {
+      "pattern": "skrim.app",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.skrim.app",
+      "custom_domain": true
+    }
   ],
-
-  "observability": { "enabled": true }
+  "observability": {
+    "enabled": true
+  }
 }
