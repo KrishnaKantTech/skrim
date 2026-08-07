@@ -385,7 +385,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         case "shares":
           sendResponse(await sessions.snapshot());
           break;
+        case "conceal":
+          // The product's hide: honours the tuck toggle. The popup's Hide
+          // button and the automatic share-hide both come through here.
+          sendResponse(await engine.conceal(msg.options));
+          break;
         case "hide":
+          // The pure vault hide, for the developer panel only.
           sendResponse(await engine.hide(msg.options));
           break;
         case "restore":
@@ -416,15 +422,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           break;
         case "setSettings":
           sendResponse(await engine.setSettings(msg.patch));
-          break;
-        case "tuck":
-          sendResponse(await engine.tuck(msg.options));
-          break;
-        case "untuck":
-          sendResponse(await engine.untuck());
-          break;
-        case "tuckStatus":
-          sendResponse(await engine.tuckStatus());
           break;
         case "exportBar":
           sendResponse(await engine.exportBar(msg.format));

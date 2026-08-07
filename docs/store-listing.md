@@ -125,13 +125,13 @@ English (United States).
 ### Single purpose description
 
 ```
-Skrim has a single purpose: to hide the Chrome bookmarks bar while the user is sharing their screen, and to restore it when the share ends.
+Skrim has a single purpose: to hide the Chrome bookmarks bar while you share your screen, and restore it when the share ends.
 
-Chrome exposes no API for bookmarks-bar visibility, so the only lever an extension has is to move the bookmarks themselves. Skrim moves everything on the bar into a folder under Other Bookmarks when a share starts, and back to its original position when the share ends.
+Chrome exposes no API to hide the bookmarks bar, so the only lever is to move the bookmarks themselves: Skrim moves the bar into a folder under Other Bookmarks when a share starts, and back when it ends.
 
-Every part of the extension serves that one function. The content scripts observe that a screen share started or stopped. The bookmarks permission performs the hide and the restore. Storage and alarms exist so a hide or restore interrupted by a crash, or by Chrome idling out the service worker, can always be completed. The toolbar popup shows the current state and offers a manual hide or restore of the same bar.
+Every part serves that one function: content scripts detect a share starting or stopping, the bookmarks permission does the hide and restore, storage and alarms let it survive a crash or an idled-out service worker, and the popup shows the state with a manual hide or restore.
 
-There is no second feature, nothing is injected into pages, there is no account, and no data is collected or transmitted.
+The popup's settings serve that same hide, not a second purpose: placeholder links keep the emptied bar from looking conspicuous, tucking into a folder is the same hide so synced computers keep theirs, and, because it moves your real bookmarks, you can keep your own backup so trying it never risks them. Nothing is injected into pages, no account, nothing collected or transmitted.
 ```
 
 ### Permission justification — `bookmarks`

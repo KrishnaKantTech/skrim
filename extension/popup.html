@@ -147,7 +147,7 @@
           <path d="M4.5 11.4a7.5 7.5 0 0 1 12.8-5.3l2.2 2.1M19.5 12.6a7.5 7.5 0 0 1-12.8 5.3l-2.2-2.1" />
           <path d="M19.5 4.6v3.6h-3.6M4.5 19.4v-3.6h3.6" />
         </svg>
-        <span
+        <span id="syncNoteText"
           >Hiding syncs. Your bar stays empty on every signed-in device until you
           restore.</span
         >
@@ -183,7 +183,7 @@
           <label class="setting" for="decoyToggle">
             <span class="setting__text">
               <span class="setting__name">Placeholder links</span>
-              <span class="setting__hint"
+              <span class="setting__hint" id="decoyHint"
                 >Leave a few neutral bookmarks on the bar while it's hidden. A
                 bar that goes suddenly empty is its own giveaway.</span
               >
@@ -194,29 +194,37 @@
             </span>
           </label>
 
-          <!-- Feature 2: park the whole bar inside one unremarkable folder. -->
+          <!-- Feature 2: hide INTO a folder that stays on the bar, instead of
+               the vault. The toggle arms it; the fold happens at hide time. The
+               win is sync -- other signed-in computers keep their bookmarks. -->
           <div class="setting setting--stack">
-            <span class="setting__text">
-              <span class="setting__name">Tuck the bar into a folder</span>
-              <span class="setting__hint" id="tuckHint"
-                >Move everything on your bar into one folder — there when you
-                want it, out of sight when you don't.</span
-              >
-            </span>
-            <div class="setting__row">
-              <input
-                type="text"
-                id="tuckName"
-                class="field"
-                maxlength="60"
-                placeholder="Folder name"
-                autocomplete="off"
-                spellcheck="false"
-              />
-              <button id="tuckBtn" class="btn btn--ghost" type="button" data-mode="tuck">
-                Tuck away
-              </button>
-            </div>
+            <!-- A <label for> (not a div), so a click anywhere on the row reaches
+                 the checkbox -- the visible track paints over the input and would
+                 otherwise swallow the click, exactly as it does for the decoy row
+                 above. The folder-name field is a sibling, outside the label. -->
+            <label class="setting__head" for="tuckToggle">
+              <span class="setting__text">
+                <span class="setting__name">Tuck the bar into a folder</span>
+                <span class="setting__hint" id="tuckHint"
+                  >When you hide, park the bar inside one folder that stays put
+                  instead of clearing it — so your other synced computers keep
+                  their bookmarks.</span
+                >
+              </span>
+              <span class="switch">
+                <input type="checkbox" id="tuckToggle" />
+                <span class="switch__track" aria-hidden="true"></span>
+              </span>
+            </label>
+            <input
+              type="text"
+              id="tuckName"
+              class="field"
+              maxlength="60"
+              placeholder="Folder name"
+              autocomplete="off"
+              spellcheck="false"
+            />
           </div>
 
           <!-- Feature 3: never lose the bar. Copy is instant here; the rest
@@ -239,7 +247,7 @@
           </div>
 
           <p class="settings__locked" id="settingsLocked" hidden>
-            Your bar is hidden right now. Restore it to change these.
+            Your bar is hidden right now. Restore it to back up.
           </p>
         </div>
       </details>

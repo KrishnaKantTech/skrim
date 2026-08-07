@@ -36,10 +36,18 @@ export async function clear() {
   await chrome.storage.local.remove(KEY);
 }
 
-export function create(groups) {
+/**
+ * `mode` records WHICH mechanism displaced the bar, so restore always matches
+ * the hide even if the user flips the tuck toggle mid-share. "vault" moves the
+ * bar into an Other-Bookmarks folder (the default); "tuck" parks it into a
+ * folder that stays ON the bar. Absent on journals written before tuck-mode
+ * existed, which read as "vault" -- the historical behaviour to the byte.
+ */
+export function create(groups, mode = "vault") {
   return {
     v: 1,
     state: State.HIDING,
+    mode,
     startedAt: Date.now(),
     updatedAt: Date.now(),
     groups,

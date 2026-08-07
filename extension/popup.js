@@ -185,6 +185,13 @@ function render(s, shares, failure) {
   // the surprise this note exists to prevent.
   const syncs = (s.bars ?? []).some((b) => b.syncing !== false);
   $("syncNote").hidden = !s.hidden || !syncs;
+  // A tuck hide syncs too, but as a folder that STAYS on the bar -- so the note
+  // is reassurance, not a warning: other devices keep their bookmarks. The vault
+  // hide gets the original "your bar goes empty everywhere" caution.
+  $("syncNoteText").textContent =
+    s.hidden && s.mode === "tuck"
+      ? "This hide stays on your bar and syncs as a folder, so your other signed-in computers keep their bookmarks instead of watching the bar clear."
+      : "Hiding syncs. Your bar stays empty on every signed-in device until you restore.";
   $("dirtyNote").hidden = !(s.hidden && s.dirty);
 
   // Unowned vaults, which are two completely different stories wearing the same
@@ -314,10 +321,11 @@ async function run(type, extra) {
 
 $("primary").onclick = (e) => {
   const action = e.currentTarget.dataset.action;
-  // No decoy option: the engine falls back to the user's setting, so the one
-  // Hide button honours it just like an automatic hide does. The developer
-  // panel below is where an explicit on/off override still lives.
-  if (action === "hide") run("hide");
+  // `conceal`, not `hide`: the one Hide button honours BOTH the user's settings
+  // -- decoys, and the tuck toggle that hides into a folder instead of the vault
+  // -- exactly as an automatic hide does. The developer panel below keeps the
+  // raw vault `hide` with its explicit decoy override.
+  if (action === "hide") run("conceal");
   else if (action === "restore") run("restore");
 };
 
@@ -375,37 +383,54 @@ let settingsLoaded = false;
 
 async function loadSettingsPanel() {
   try {
-    const [cfg, tuck, s] = await Promise.all([
-      send("getSettings"),
-      send("tuckStatus"),
-      send("status"),
-    ]);
-    renderSettings(cfg, tuck, s);
+    const [cfg, s] = await Promise.all([send("getSettings"), send("status")]);
+    renderSettings(cfg, s);
     settingsLoaded = true;
   } catch {
     /* leave the controls at their markup defaults */
   }
 }
 
-function renderSettings(cfg, tuck, s) {
+// The decoy hint's default copy, restated here for the same reason renderSettings
+// restates the tuck hint: the panel owns the text once it has loaded.
+const DECOY_HINT =
+  "Leave a few neutral bookmarks on the bar while it's hidden. A bar that goes suddenly empty is its own giveaway.";
+
+/**
+ * Placeholder links only exist to fill a bar that a VAULT hide leaves empty. A
+ * tuck hide leaves the folder on the bar instead, so decoys never run in that
+ * mode. Reflect that by greying the toggle and saying why -- WITHOUT touching the
+ * stored `decoys` preference, so it returns intact when tuck mode is turned off.
+ */
+function applyDecoyAvailability(tuckOn) {
+  $("decoyToggle").disabled = tuckOn;
+  $("decoyHint").textContent = tuckOn
+    ? "Not used while the bar tucks into a folder — the folder is the cover."
+    : DECOY_HINT;
+}
+
+function renderSettings(cfg, s) {
   const hidden = !!s?.hidden;
 
+  // The real stored value either way -- greyed while tucking, never overwritten.
   if (cfg && typeof cfg.decoys === "boolean") $("decoyToggle").checked = cfg.decoys;
-  $("decoyToggle").disabled = false; // the one control that is safe while hidden
 
-  const tucked = !!tuck?.tucked;
-  const name = tuck?.name ?? cfg?.tuckName ?? "";
+  // The tuck toggle and its folder name are both preferences that take effect on
+  // the NEXT hide, never the current one -- a live hide is put back by whatever
+  // the journal recorded, not by these -- so both stay editable while hidden.
+  if (cfg && typeof cfg.tuckMode === "boolean") $("tuckToggle").checked = cfg.tuckMode;
+  $("tuckToggle").disabled = false;
+  applyDecoyAvailability(!!cfg?.tuckMode);
   // Do not stomp on a name the user is mid-way through typing.
-  if (document.activeElement !== $("tuckName")) $("tuckName").value = name;
-  $("tuckName").disabled = tucked || hidden;
-  $("tuckName").hidden = tucked;
-  $("tuckBtn").textContent = tucked ? "Move back to the bar" : "Tuck away";
-  $("tuckBtn").dataset.mode = tucked ? "untuck" : "tuck";
-  $("tuckBtn").disabled = hidden;
-  $("tuckHint").textContent = tucked
-    ? `Your bar is tucked into “${name}”. Everything goes back to where it was when you move it out.`
-    : "Move everything on your bar into one folder — there when you want it, out of sight when you don't.";
+  if (document.activeElement !== $("tuckName")) $("tuckName").value = cfg?.tuckName ?? "";
+  $("tuckName").disabled = false;
+  // When the current hide IS a tuck, the hint by the field says so.
+  $("tuckHint").textContent =
+    hidden && s?.mode === "tuck"
+      ? `Your bar is tucked into “${cfg?.tuckName ?? "a folder"}”. It comes back out the moment you restore.`
+      : "When you hide, park the bar inside one folder that stays put instead of clearing it — so your other synced computers keep their bookmarks.";
 
+  // Only the backup copy actually needs a visible bar; keep its lock and note.
   $("copyBtn").disabled = hidden;
   $("settingsLocked").hidden = !hidden;
 }
@@ -421,20 +446,29 @@ $("decoyToggle").onchange = async (e) => {
   await send("setSettings", { patch: { decoys } }).catch(() => {});
 };
 
-$("tuckBtn").onclick = async (e) => {
-  const btn = e.currentTarget;
-  const untucking = btn.dataset.mode === "untuck";
-  btn.disabled = true;
-  btn.textContent = untucking ? "Moving back…" : "Tucking…";
-  try {
-    if (untucking) await send("untuck");
-    else await send("tuck", { options: { name: $("tuckName").value } });
-  } catch {
-    /* the reload below re-reads the true state either way */
-  }
-  await loadSettingsPanel();
-  refresh();
+// The tuck toggle just arms the mode; nothing moves until the next hide, so this
+// only writes the preference -- and greys the placeholder-links control, which
+// does not apply while tucking, live before the round trip.
+$("tuckToggle").onchange = async (e) => {
+  const tuckMode = !!e.currentTarget.checked;
+  applyDecoyAvailability(tuckMode);
+  await send("setSettings", { patch: { tuckMode } }).catch(() => {});
 };
+
+// The folder name has no submit -- whatever is in the box is what the next tuck
+// uses -- so it is saved as the user types (debounced), and again on blur to
+// catch the final keystroke. An empty box is ignored by the worker, which keeps
+// the last good name.
+let tuckNameTimer = null;
+function saveTuckName() {
+  clearTimeout(tuckNameTimer);
+  return send("setSettings", { patch: { tuckName: $("tuckName").value } }).catch(() => {});
+}
+$("tuckName").oninput = () => {
+  clearTimeout(tuckNameTimer);
+  tuckNameTimer = setTimeout(saveTuckName, 400);
+};
+$("tuckName").onblur = saveTuckName;
 
 $("copyBtn").onclick = async (e) => {
   const btn = e.currentTarget;

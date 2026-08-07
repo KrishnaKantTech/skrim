@@ -61,11 +61,6 @@ async function findVaults() {
 const OWNED_VAULTS_KEY = "secureshare.ownedVaults";
 const LAST_FAILURE_KEY = "secureshare.lastFailure";
 const STRAY_DECOYS_KEY = "secureshare.strayDecoys";
-// The folders the tuck feature parks bar items in, one id per bar group. State,
-// not a preference: it names live bookmark folders, so it lives here with the
-// engine's other bookkeeping rather than in settings, where a reset could
-// strand them.
-const TUCK_KEY = "secureshare.tuck";
 
 // Give up rather than retry a hopeless restore forever.
 const MAX_RESTORE_ATTEMPTS = 3;
@@ -517,6 +512,9 @@ export async function sweepOrphanVaults() {
 // bookmark would be on screen for the whole share.
 
 async function stillHidden(j) {
+  // A tuck hide leaves a folder on the bar rather than an empty one, so its
+  // "still hidden" question is a different one -- see stillTucked.
+  if (j?.mode === "tuck") return stillTucked(j);
   for (const entry of j.groups ?? []) {
     const kids = await childrenOrNull(entry.barId);
     if (kids === null) return false;
@@ -747,6 +745,12 @@ async function restoreImpl({ internal = false } = {}) {
     return { ok: true, alreadyRestored: true, ...(await housekeeping()) };
   }
 
+  // A tuck hide is put back by a different, simpler path: its items sit in a
+  // folder on the bar, not a vault, and no decoys, receipts or owned vaults are
+  // in play. Branch before any of that machinery runs. recover() reaches restore
+  // through here too, so an interrupted tuck is repaired by the same code.
+  if (j.mode === "tuck") return tuckRestoreImpl(j, { internal });
+
   if (!internal) await journal.setState(journal.State.RESTORING);
 
   // Decoys first, so real items land on a bar that is as close to empty as
@@ -941,6 +945,24 @@ export const hide = (opts) => serialize(() => hideImpl(opts));
 export const restore = (opts) => serialize(() => restoreImpl(opts));
 
 /**
+ * Hide by whichever mechanism the user has chosen. This is the entry point the
+ * PRODUCT drives -- the automatic share-hide and the popup's Hide button --
+ * while `hide` stays the pure vault primitive the tests and the developer panel
+ * use. The choice is read from settings here and written into the journal by the
+ * hide it dispatches to, so restore, which is mode-aware, always matches even if
+ * the toggle is flipped mid-share.
+ *
+ * settings.read() falls back to safe defaults (tuck OFF) on a storage failure,
+ * so a glitch can only ever route to the vault path, never strand a hide.
+ */
+async function concealImpl(opts = {}) {
+  const { tuckMode, tuckName } = await settings.read();
+  return tuckMode ? tuckHideImpl(tuckName) : hideImpl(opts);
+}
+
+export const conceal = (opts) => serialize(() => concealImpl(opts));
+
+/**
  * Repair an INTERRUPTED operation. Deliberately does not touch a healthy
  * HIDDEN state: onInstalled fires on extension auto-update, and un-hiding
  * mid-meeting would repopulate the bar on a live screen share.
@@ -984,7 +1006,8 @@ export const markDirty = (reason, id, parentIds) =>
       const relevant = new Set();
       for (const e of j.groups ?? []) {
         relevant.add(e.barId);
-        relevant.add(e.vaultId);
+        relevant.add(e.vaultId); // vault hide
+        relevant.add(e.folderId); // tuck hide -- only one of the two is set
       }
       if (!parentIds.some((p) => p != null && relevant.has(p))) {
         return { marked: false, irrelevant: true };
@@ -1131,6 +1154,9 @@ export const status = () =>
     }
     return {
       hidden: journal.isDisplaced(j),
+      // "vault" or "tuck" while displaced, so the popup can say which. Null at
+      // rest. An older journal without the field reads as the vault default.
+      mode: journal.isDisplaced(j) ? j.mode ?? "vault" : null,
       state: j?.state ?? journal.State.CLEAR,
       since: j?.startedAt ?? null,
       dirty: j?.dirty ?? false,
@@ -1152,143 +1178,257 @@ export const getSettings = () => settings.read();
 export const setSettings = (patch) => settings.write(patch);
 
 // ---------------------------------------------------------------------------
-// Tuck.
+// Tuck hide.
 //
-// A second, standing way to keep the bar clear, unrelated to screen sharing:
-// park everything on the bar inside a single folder that stays there. The
-// folder is left with an ordinary, forgettable name (the user's, defaulting to
-// a generic one), so the bar reads as tidy rather than as hidden. Untuck puts
-// every item back where the folder sat.
+// The other way to clear the bar for a screen share, chosen by the tuck toggle:
+// instead of moving the bar's items OFF to an Other-Bookmarks vault, park them
+// inside a single, ordinarily-named folder that STAYS on the bar. The share
+// sees one tidy folder; the names and URLs are one click away but not on screen.
 //
-// It composes with hide for free: the tuck folder is an ordinary bar child, so
-// a share that starts while tucked moves the folder into the vault with
-// everything else and restore brings it back. Both refuse to run while the bar
-// is hidden -- the real items are in the vault then, and the id list would
-// describe a bar that is not currently the one on screen.
+// Why offer it at all: sync. A vault hide moves items into Other Bookmarks, and
+// Chrome syncs that -- so a second signed-in computer watches its own bar empty
+// mid-meeting (M0-FINDINGS §6). A tuck keeps everything on the bar, so that
+// second computer keeps its bookmarks; they just sit inside the folder until the
+// share ends and the folder is emptied back out. Nothing is ever parked outside
+// the bar, so an uninstall while tucked leaves a plainly-named folder the user
+// can open by hand -- no vault, no receipt, no recovery page needed.
+//
+// It rides the same journal state machine as the vault hide (mode: "tuck"), so
+// status, the toolbar icon, the watchdog's stuck-hide recovery and share
+// idempotency all work unchanged. restore() and recover() branch on that mode.
 
-async function readTuck() {
-  const got = await chrome.storage.local.get(TUCK_KEY);
-  const t = got[TUCK_KEY];
-  return Array.isArray(t?.folders) ? t.folders.map(String) : [];
-}
-
-async function writeTuck(folders) {
-  const clean = [...new Set((folders ?? []).map(String))];
-  if (clean.length === 0) await chrome.storage.local.remove(TUCK_KEY);
-  else await chrome.storage.local.set({ [TUCK_KEY]: { folders: clean } });
-}
-
-/** Which recorded folders still exist as folders, pruning the record if not. */
-async function tuckStatusImpl() {
-  const recorded = await readTuck();
-  const live = [];
-  for (const id of recorded) {
-    const node = (await chrome.bookmarks.get(id).catch(() => []))?.[0] ?? null;
-    if (node && node.url === undefined) live.push(id);
+/** The tuck equivalent of stillHidden: the folder is still on the bar and holds
+ *  the items, and nothing movable sits loose beside it. */
+async function stillTucked(j) {
+  const folderIds = new Set((j.groups ?? []).map((e) => e.folderId).filter(Boolean));
+  for (const entry of j.groups ?? []) {
+    // The folder we parked into must still be a folder, still on its bar. A null
+    // folderId means the hide was interrupted before it was created -- not tucked.
+    if (!entry.folderId) return false;
+    const node = (await chrome.bookmarks.get(entry.folderId).catch(() => []))?.[0] ?? null;
+    if (!node || node.url !== undefined || node.parentId !== entry.barId) return false;
+    const kids = await childrenOrNull(entry.barId);
+    if (kids === null) return false;
+    for (const k of kids) {
+      if (!isMutable(k)) continue;
+      if (folderIds.has(k.id)) continue; // the tuck folder itself belongs here
+      return false; // a real bookmark the user dragged back out is on screen
+    }
   }
-  if (live.length !== recorded.length) await writeTuck(live);
-  const { tuckName } = await settings.read();
-  return { tucked: live.length > 0, folders: live.length, name: tuckName };
+  return true;
 }
 
-async function tuckImpl({ name } = {}) {
-  if (journal.isDisplaced(await journal.read())) {
-    return { ok: false, hidden: true, error: "cannot tuck while the bar is hidden" };
+/** Anything movable still loose on a bar, other than the tuck folder itself. */
+async function findTuckLeaks(entries) {
+  const leaks = [];
+  for (const entry of entries) {
+    const kids = await childrenOrNull(entry.barId);
+    if (kids === null) continue;
+    for (const k of kids) {
+      if (!isMutable(k)) continue;
+      if (k.id === entry.folderId) continue;
+      leaks.push({ id: k.id, folderId: entry.folderId });
+    }
   }
-  // Remember the name so the panel pre-fills it and the next tuck reuses it.
-  const saved =
-    typeof name === "string" && name.trim()
-      ? await settings.write({ tuckName: name })
-      : await settings.read();
-  const folderTitle = saved.tuckName;
+  return leaks;
+}
+
+async function tuckHideImpl(name) {
+  // Reconcile a stale hide first, exactly as the vault path does. Whatever
+  // displaced the bar, restore is mode-aware and puts it back before we re-hide.
+  const existing = await journal.read();
+  if (journal.isDisplaced(existing)) {
+    if (existing.mode === "tuck" && (await stillHidden(existing))) {
+      return { ok: true, alreadyHidden: true, moved: 0 };
+    }
+    const reconciled = await restoreImpl({ internal: true });
+    if (!reconciled.ok && !reconciled.gaveUp) {
+      return { ok: false, error: "reconcile before hide failed", reconciled };
+    }
+  }
+
+  const folderTitle = (String(name ?? "").trim().slice(0, 60)) || settings.DEFAULTS.tuckName;
 
   const { groups } = await getGroups().catch(() => ({ groups: [] }));
   if (groups.length === 0) return { ok: false, error: "no bookmarks bar" };
 
-  const recorded = new Set(await readTuck());
-  const isTuckFolder = (k) => k.url === undefined && recorded.has(k.id);
-  const folders = [];
-  let moved = 0;
-
+  // Snapshot each bar's movable children -- links AND folders, because a tidy
+  // bar hides all of it -- with their absolute indices, so restore lands them
+  // back around any policy-managed siblings that never moved.
+  const plan = [];
   for (const g of groups) {
-    const barKids = await childrenOrNull(g.bar.id);
-    if (barKids === null) continue;
-    // Reuse this bar's existing tuck folder if it already has one, so tucking
-    // again just sweeps in anything added since rather than nesting folders.
-    let folderId = barKids.find(isTuckFolder)?.id ?? null;
-    // Everything movable on the bar that is not itself a tuck folder -- links
-    // and folders alike, because a tidy bar means all of it goes in.
-    const loose = barKids.filter((k) => isMutable(k) && !isTuckFolder(k));
-    if (loose.length === 0) {
-      if (folderId) folders.push(folderId);
+    const kids = (await childrenOf(g.bar.id)).filter(isMutable);
+    if (kids.length === 0) continue;
+    plan.push({ barId: g.bar.id, syncing: g.syncing, items: kids.map((k) => ({ id: k.id, index: k.index })) });
+  }
+  if (plan.length === 0) return { ok: true, moved: 0, reason: "nothing to hide" };
+
+  // Write-ahead: the journal records every item BEFORE anything moves, so an
+  // interruption is repaired by id. folderId is filled in per group as the
+  // folder is created, and each write persists the id of a folder that now
+  // exists -- so recovery can always find and empty it.
+  const entries = plan.map((p) => ({ barId: p.barId, syncing: p.syncing, folderId: null, items: p.items }));
+  const j = journal.create(entries, "tuck");
+  // The intended folder name, so a crash between creating a folder and writing
+  // its id can still be cleaned up by name on recovery (see tuckRestoreImpl).
+  j.folderTitle = folderTitle;
+  await journal.write(j);
+
+  let moved = 0;
+  const failures = [];
+  for (const entry of entries) {
+    let folder;
+    try {
+      folder = await bmCreate({ parentId: entry.barId, title: folderTitle });
+    } catch (err) {
+      failures.push({ barId: entry.barId, error: String(err?.message ?? err) });
       continue;
     }
-    if (!folderId) {
-      const created = await bmCreate({ parentId: g.bar.id, title: folderTitle });
-      folderId = created.id;
-    }
-    for (const k of loose) {
+    entry.folderId = folder.id;
+    await journal.write(j);
+    for (const item of entry.items) {
       try {
-        await bmMove(k.id, { parentId: folderId });
+        await bmMove(item.id, { parentId: folder.id });
         moved++;
-      } catch { /* one stuck item must not block the rest */ }
+      } catch (err) {
+        failures.push({ id: item.id, error: String(err?.message ?? err) });
+      }
     }
-    folders.push(folderId);
   }
 
-  // Keep any recorded folder we did not revisit this pass but that still exists,
-  // so untuck never loses track of one.
-  for (const id of recorded) {
-    if (!folders.includes(id) && (await nodeExists(id))) folders.push(id);
+  if (failures.length > 0) {
+    await journal.setState(journal.State.RESTORING);
+    const rollback = await restoreImpl({ internal: true });
+    return { ok: false, error: "partial tuck, rolled back", failures, rollback };
   }
-  await writeTuck(folders);
-  return { ok: true, tucked: folders.length > 0, folders: folders.length, moved, name: folderTitle };
+
+  // Verify: nothing movable may remain loose on any bar except the tuck folder.
+  let leaked = await findTuckLeaks(entries);
+  if (leaked.length > 0) {
+    for (const l of leaked) {
+      try { await bmMove(l.id, { parentId: l.folderId }); } catch { /* recheck below */ }
+    }
+    leaked = await findTuckLeaks(entries);
+  }
+  if (leaked.length > 0) {
+    await journal.setState(journal.State.RESTORING);
+    const rollback = await restoreImpl({ internal: true });
+    return { ok: false, error: "verification failed, rolled back", leaked, rollback };
+  }
+
+  dirtySuppressed = false; // from here a tree change is worth recording
+  await journal.setState(journal.State.HIDDEN);
+  return { ok: true, moved, folders: entries.length, name: folderTitle };
 }
 
-async function untuckImpl() {
-  if (journal.isDisplaced(await journal.read())) {
-    return { ok: false, hidden: true, error: "cannot untuck while the bar is hidden" };
-  }
-  const recorded = await readTuck();
-  let restored = 0;
-  const kept = [];
+async function tuckRestoreImpl(j, { internal = false } = {}) {
+  if (!internal) await journal.setState(journal.State.RESTORING);
 
-  for (const id of recorded) {
-    const node = (await chrome.bookmarks.get(id).catch(() => []))?.[0] ?? null;
-    if (!node) continue; // already gone
-    if (node.url !== undefined) continue; // no longer a folder -- leave it alone
-    const barId = node.parentId;
-    const kids = await childrenOrNull(id);
-    if (kids === null) {
-      kept.push(id); // unreadable this pass -- keep the record, retry later
-      continue;
-    }
-    const barKids = await childrenOrNull(barId);
+  let restored = 0;
+  const missing = [];
+  const stuck = [];
+
+  for (const entry of j.groups) {
+    const barKids = await childrenOrNull(entry.barId);
+    // Track length locally so every index is in range without re-reading the bar
+    // N times. Chrome rejects an out-of-range index; it does not clamp.
     let len = barKids === null ? 0 : barKids.length;
-    // Land the items where the folder sat, in the order they were inside it.
-    let at = typeof node.index === "number" ? node.index : len;
-    for (const k of kids) {
+    for (const item of entry.items) {
+      // When the tree changed under us, a stale absolute index is worse than
+      // useless; appending preserves journalled relative order instead.
+      const target = j.dirty ? len : Math.min(item.index, len);
       try {
-        await bmMove(k.id, { parentId: barId, index: Math.min(at, len) });
-        at++;
+        await bmMove(item.id, { parentId: entry.barId, index: target });
         len++;
         restored++;
-      } catch { /* keep going; a stuck item just leaves the folder non-empty */ }
-    }
-    const left = await childrenOrNull(id);
-    if (left !== null && left.length === 0) {
-      if (!(await safeRemoveTree(id))) kept.push(id);
-    } else {
-      kept.push(id); // something would not move -- keep the folder and the record
+      } catch (err) {
+        if (await nodeExists(item.id)) {
+          stuck.push({ id: item.id, error: String(err?.message ?? err) });
+        } else {
+          missing.push({ id: item.id });
+        }
+      }
     }
   }
-  await writeTuck(kept);
-  return { ok: kept.length === 0, untucked: true, restored, folders: kept.length };
-}
 
-export const tuck = (opts) => serialize(() => tuckImpl(opts));
-export const untuck = () => serialize(untuckImpl);
-export const tuckStatus = () => serialize(tuckStatusImpl);
+  // Verify by RELATIVE order, not absolute position: a bookmark the user added
+  // during the share legitimately shifts everything and must not read as
+  // corruption. The tuck folder is excluded -- it is deleted below.
+  const mismatches = [];
+  for (const entry of j.groups) {
+    const kids = await childrenOrNull(entry.barId);
+    if (kids === null) {
+      mismatches.push({ barId: entry.barId, error: "bar unreadable" });
+      continue;
+    }
+    const gone = new Set([...missing, ...stuck].map((m) => m.id));
+    const expected = entry.items.map((i) => i.id).filter((id) => !gone.has(id));
+    const actual = kids.map((k) => k.id).filter((id) => expected.includes(id));
+    for (let i = 0; i < expected.length; i++) {
+      if (actual[i] !== expected[i]) {
+        mismatches.push({ index: i, expected: expected[i], actual: actual[i] ?? null });
+      }
+    }
+  }
+
+  // Delete each now-empty tuck folder. A folder still holding a stuck item is
+  // kept, along with the journal, so the watchdog can retry.
+  for (const entry of j.groups) {
+    if (!entry.folderId) continue;
+    const left = await childrenOrNull(entry.folderId);
+    if (left !== null && left.length === 0) await safeRemoveTree(entry.folderId);
+  }
+
+  // Orphan sweep. A crash between creating a folder and journalling its id
+  // leaves an EMPTY folder on the bar the id-based delete above cannot see.
+  // Bounded exactly like the decoy sweep -- our title, empty, and newer than
+  // this hide began -- so it can never take a folder the user made themselves.
+  if (j.folderTitle) {
+    for (const barId of new Set(j.groups.map((e) => e.barId))) {
+      const kids = await childrenOrNull(barId);
+      for (const k of kids ?? []) {
+        if (k.url !== undefined || k.title !== j.folderTitle) continue;
+        if (typeof k.dateAdded === "number" && k.dateAdded < (j.startedAt ?? 0)) continue;
+        const inside = await childrenOrNull(k.id);
+        if (inside !== null && inside.length === 0) await safeRemoveTree(k.id);
+      }
+    }
+  }
+
+  const totalItems = j.groups.reduce((n, e) => n + e.items.length, 0);
+  const totalLoss = totalItems > 0 && restored === 0 && missing.length === totalItems;
+  const ok = stuck.length === 0 && mismatches.length === 0 && !totalLoss;
+
+  let gaveUp = false;
+  if (ok) {
+    await journal.clear();
+    await chrome.storage.local.remove(LAST_FAILURE_KEY);
+  } else {
+    j.attempts = (j.attempts ?? 0) + 1;
+    if (j.attempts >= MAX_RESTORE_ATTEMPTS) {
+      gaveUp = true;
+      await chrome.storage.local.set({
+        [LAST_FAILURE_KEY]: {
+          at: Date.now(),
+          attempts: j.attempts,
+          restored,
+          missing: missing.map((m) => m.id),
+          stuck: stuck.map((m) => m.id),
+          decoysStuck: [],
+          mismatches: mismatches.length,
+        },
+      });
+      await journal.clear();
+    } else {
+      j.state = journal.State.RESTORING;
+      j.updatedAt = Date.now();
+      await journal.write(j);
+    }
+  }
+
+  dirtySuppressed = true; // no live hide either way, so nothing to mark
+  return { ok, gaveUp, attempts: j.attempts ?? 0, restored, missing, stuck, decoysStuck: 0, mismatches, ...(await housekeeping()) };
+}
 
 // ---------------------------------------------------------------------------
 // Backup: export the bar to a portable file, and import one back.

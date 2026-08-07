@@ -2665,87 +2665,193 @@ async function testDecoySettingControlsHide() {
   check("decoy setting: override restore is exact", JSON.stringify(mock.snapshot("1")) === before);
 }
 
-async function testTuckRoundTrip() {
+// TUCK MODE -- hiding INTO a folder that stays on the bar, chosen by the toggle,
+// instead of the Other-Bookmarks vault. Same discipline as the vault path: a
+// conceal/restore round trip is byte-identical, nothing real may sit on the bar
+// while hidden, the mechanism is recorded in the journal so restore matches even
+// after the toggle flips, and an interruption at any await must recover.
+
+const tuckOn = (engine) => engine.setSettings({ tuckMode: true });
+const barNodes = (mock) => mock.nodes.get("1").children.map((c) => mock.nodes.get(c));
+
+async function testTuckModeConcealRoundTrip() {
   const mock = build();
   const engine = await loadEngine(mock);
   const before = JSON.stringify(mock.snapshot("1"));
   const barBefore = mock.nodes.get("1").children.map((c) => mock.nodes.get(c).title);
 
-  const t = await engine.tuck({ name: "Bookmarks" });
-  check("tuck: reports success", t.ok === true && t.tucked === true, JSON.stringify(t));
-  const barKids = mock.nodes.get("1").children;
-  check("tuck: the bar is left holding one folder", barKids.length === 1, `${barKids.length} on the bar`);
-  const folder = mock.nodes.get(barKids[0]);
-  check("tuck: the folder is named as asked", folder.title === "Bookmarks" && folder.url === undefined, folder.title);
-  const inside = folder.children.map((c) => mock.nodes.get(c).title);
-  check("tuck: every bar item moved into it, in order",
+  await tuckOn(engine);
+  const r = await engine.conceal();
+  check("tuck-mode: conceal reports a tuck hide", r.ok === true && r.folders === 1, JSON.stringify(r));
+
+  const bar = barNodes(mock);
+  check("tuck-mode: the bar is left holding exactly one folder", bar.length === 1, `${bar.length} on the bar`);
+  check("tuck-mode: named from the tuckName setting", bar[0].title === "Bookmarks" && bar[0].url === undefined, bar[0].title);
+  const inside = bar[0].children.map((c) => mock.nodes.get(c).title);
+  check("tuck-mode: every bar item is inside it, in order",
     JSON.stringify(inside) === JSON.stringify(barBefore), inside.join(","));
+  check("tuck-mode: nothing was moved off to a vault", !findVault(mock));
 
-  const st = await engine.tuckStatus();
-  check("tuck: status reports tucked", st.tucked === true && st.folders === 1 && st.name === "Bookmarks", JSON.stringify(st));
+  const st = await engine.status();
+  check("tuck-mode: status reports hidden, mode tuck", st.hidden === true && st.mode === "tuck",
+    JSON.stringify({ hidden: st.hidden, mode: st.mode }));
+  check("tuck-mode: and counts the displaced items", st.itemsDisplaced === barBefore.length, `${st.itemsDisplaced}`);
 
-  const u = await engine.untuck();
-  check("untuck: reports success", u.ok === true && u.untucked === true, JSON.stringify(u));
-  check("untuck: the bar is byte-identical to before it was tucked",
-    JSON.stringify(mock.snapshot("1")) === before);
-  const st2 = await engine.tuckStatus();
-  check("untuck: status reports not tucked", st2.tucked === false && st2.folders === 0, JSON.stringify(st2));
+  const u = await engine.restore();
+  check("tuck-mode: restore reports ok", u.ok === true, JSON.stringify(u));
+  check("tuck-mode: the bar is byte-identical after restore", JSON.stringify(mock.snapshot("1")) === before);
+  check("tuck-mode: the empty folder is gone and the journal is clear",
+    (await engine.status()).hidden === false && barNodes(mock).length === barBefore.length);
 }
 
-async function testTuckComposesWithHide() {
+async function testTuckModeLeavesNothingRealOnTheBar() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  await tuckOn(engine);
+  await engine.conceal();
+  const j = await mock.api.storage.local.get("secureshare.journal");
+  const folderId = j["secureshare.journal"].groups[0].folderId;
+  // The privacy guarantee: every movable thing on the bar is the tuck folder.
+  const loose = barNodes(mock).filter((n) => n.id !== folderId && !n.unmodifiable);
+  check("tuck-mode: no real bookmark is left loose on the bar while hidden",
+    loose.length === 0, loose.map((n) => n.title).join(","));
+  await engine.restore();
+}
+
+async function testConcealHonoursTheToggle() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+
+  // Toggle off (the default): conceal is the vault hide -- decoys on the bar, a
+  // real vault in Other Bookmarks -- exactly as the automatic hide always was.
+  await engine.conceal();
+  const bar = barNodes(mock);
+  check("conceal off: the bar carries decoys, not one folder",
+    bar.length === 6 && bar.some((n) => n.title === "Google"), bar.map((n) => n.title).join(","));
+  check("conceal off: a vault was created in Other Bookmarks", !!findVault(mock));
+  check("conceal off: the journal records mode vault", (await engine.status()).mode === "vault");
+  await engine.restore();
+
+  // Toggle on: the same conceal now tucks instead, and creates no vault.
+  await tuckOn(engine);
+  await engine.conceal();
+  const bar2 = barNodes(mock);
+  check("conceal on: the bar carries one folder and no decoys",
+    bar2.length === 1 && bar2[0].url === undefined && !bar2.some((n) => n.title === "Google"),
+    bar2.map((n) => n.title).join(","));
+  check("conceal on: no vault this time", !findVault(mock));
+  check("conceal on: the journal records mode tuck", (await engine.status()).mode === "tuck");
+  await engine.restore();
+}
+
+async function testTuckModeRestoreFollowsTheJournalNotTheToggle() {
   const mock = build();
   const engine = await loadEngine(mock);
   const before = JSON.stringify(mock.snapshot("1"));
 
-  await engine.tuck({ name: "Bookmarks" });
-  await engine.hide(); // default: decoys on
-  const bar = mock.nodes.get("1").children.map((c) => mock.nodes.get(c));
-  check("tuck+hide: the tuck folder is moved off the bar",
-    !bar.some((n) => n.url === undefined && n.title === "Bookmarks"), bar.map((n) => n.title).join(","));
-  check("tuck+hide: decoys stand in for it", bar.length === 6, `${bar.length} on the bar`);
+  // Tuck-hide, then flip the toggle OFF mid-share. Restore must still UNTUCK --
+  // the mechanism is the journal's, not the live setting's.
+  await tuckOn(engine);
+  await engine.conceal();
+  await engine.setSettings({ tuckMode: false });
+  const u = await engine.restore();
+  check("mode-record: a tuck hide restores as a tuck even after the toggle flips off",
+    u.ok === true && JSON.stringify(mock.snapshot("1")) === before, JSON.stringify(u));
 
-  await engine.restore();
-  const bar2 = mock.nodes.get("1").children.map((c) => mock.nodes.get(c));
-  check("tuck+hide+restore: the tuck folder comes back",
-    bar2.length === 1 && bar2[0].title === "Bookmarks" && bar2[0].url === undefined,
-    bar2.map((n) => n.title).join(","));
-
-  const u = await engine.untuck();
-  check("tuck+hide+restore+untuck: everything is byte-identical",
-    u.ok === true && JSON.stringify(mock.snapshot("1")) === before);
+  // And the reverse: a vault hide restores as a vault even after the toggle is on.
+  await engine.conceal(); // toggle off now -> vault
+  check("mode-record: precondition -- a vault hide is in effect", (await engine.status()).mode === "vault");
+  await engine.setSettings({ tuckMode: true });
+  const u2 = await engine.restore();
+  check("mode-record: a vault hide restores as a vault even after the toggle flips on",
+    u2.ok === true && !findVault(mock) && JSON.stringify(mock.snapshot("1")) === before, JSON.stringify(u2));
 }
 
-async function testTuckRefusesWhileHidden() {
+async function testTuckModeReassertIsIdempotent() {
   const mock = build();
   const engine = await loadEngine(mock);
-  await engine.hide({ decoys: false });
-  const before = JSON.stringify(mock.snapshot("0"));
+  await tuckOn(engine);
+  await engine.conceal();
+  const afterFirst = JSON.stringify(mock.snapshot("1"));
 
-  const t = await engine.tuck({ name: "Bookmarks" });
-  check("tuck: refuses while the bar is hidden", t.ok === false && t.hidden === true, JSON.stringify(t));
-  const u = await engine.untuck();
-  check("untuck: refuses while the bar is hidden", u.ok === false && u.hidden === true, JSON.stringify(u));
-  check("tuck: a refusal changes nothing in the tree", JSON.stringify(mock.snapshot("0")) === before);
-
+  const r2 = await engine.conceal(); // a second presenter joining re-asserts
+  check("tuck-mode: a re-asserted hide is a no-op", r2.alreadyHidden === true, JSON.stringify(r2));
+  check("tuck-mode: and does not nest a second folder or move anything",
+    JSON.stringify(mock.snapshot("1")) === afterFirst && barNodes(mock).length === 1);
   await engine.restore();
 }
 
-async function testTuckSweepsItemsAddedLater() {
+async function testTuckModeReconcilesAManuallyEmptiedFolder() {
   const mock = build();
   const engine = await loadEngine(mock);
-  await engine.tuck({ name: "Bookmarks" });
-  await mock.api.bookmarks.create({ parentId: "1", title: "Fresh", url: "https://fresh.example/" });
-  check("tuck: a bookmark added afterwards sits outside the folder",
-    mock.nodes.get("1").children.length === 2);
+  const before = JSON.stringify(mock.snapshot("1"));
+  await tuckOn(engine);
+  await engine.conceal();
+  const folderId = barNodes(mock)[0].id;
 
-  const t = await engine.tuck({ name: "Bookmarks" });
-  check("tuck again: reuses the same folder rather than nesting a second",
-    t.folders === 1 && mock.nodes.get("1").children.length === 1, JSON.stringify(t));
-  const folder = mock.nodes.get(mock.nodes.get("1").children[0]);
-  check("tuck again: the new bookmark is swept in",
-    folder.children.map((c) => mock.nodes.get(c).title).includes("Fresh"));
+  // The user drags one bookmark back out of the folder onto the bar -- it is now
+  // exposed. The next hide must notice and re-tuck, not no-op.
+  const dragged = mock.nodes.get(folderId).children[0];
+  await mock.api.bookmarks.move(dragged, { parentId: "1", index: 0 });
+  check("tuck-mode: precondition -- an item is loose on the bar again", barNodes(mock).length === 2);
 
-  await engine.untuck();
+  await engine.conceal();
+  check("tuck-mode: a re-hide sweeps the loose item back in",
+    barNodes(mock).length === 1 && barNodes(mock)[0].url === undefined,
+    barNodes(mock).map((n) => n.title).join(","));
+  await engine.restore();
+  check("tuck-mode: and it still restores byte-identically", JSON.stringify(mock.snapshot("1")) === before);
+}
+
+async function testTuckModeEndToEndShare() {
+  const mock = build();
+  const before = JSON.stringify(mock.snapshot("1"));
+  const { engine } = await loadSw(mock);
+  const tab = (id, frameId = 0) => ({ tab: { id }, frameId });
+
+  await mock.message({ type: "setSettings", patch: { tuckMode: true } });
+  await mock.message({ type: "share:start", sid: "a" }, tab(1));
+  await flush(engine);
+  const bar = barNodes(mock);
+  check("tuck-mode e2e: a real share tucks the bar into one folder",
+    bar.length === 1 && bar[0].url === undefined, bar.map((n) => n.title).join(","));
+  check("tuck-mode e2e: status agrees it is a tuck", (await engine.status()).mode === "tuck");
+  check("tuck-mode e2e: and no vault was created", !findVault(mock));
+
+  await mock.message({ type: "share:end", sid: "a" }, tab(1));
+  await flush(engine);
+  check("tuck-mode e2e: the bar is byte-identical after the share ends",
+    JSON.stringify(mock.snapshot("1")) === before);
+  check("tuck-mode e2e: no live shares left", (await mock.message({ type: "shares" })).sharing === 0);
+}
+
+async function testTuckModeSurvivesInterruption(maxCalls = 70) {
+  let repaired = 0, broken = 0;
+  const brokenAt = [];
+  // n starts at 2: call 1 is conceal's settings read, whose designed response to
+  // a failure is a safe fallback to the (complete, restorable) vault hide, not a
+  // corruption -- so faulting it tests nothing about the tuck machinery. From
+  // call 2 on, every fault lands inside the tuck hide itself.
+  for (let n = 2; n <= maxCalls; n++) {
+    const mock = build();
+    const before = JSON.stringify(mock.snapshot("1"));
+    const engine = await loadEngine(mock);
+    await engine.setSettings({ tuckMode: true });
+
+    mock.calls = 0;
+    mock.failAt = n;
+    try { await engine.conceal(); } catch { /* expected */ }
+    if (!mock.failed) break; // ran out of calls to fail
+
+    mock.failAt = null;
+    try { await engine.recover({ maxHiddenMs: 0 }); } catch { /* must not throw */ }
+    try { await engine.recover({ maxHiddenMs: 0 }); } catch { /* idempotent 2nd pass */ }
+
+    const after = JSON.stringify(mock.snapshot("1"));
+    if (after === before) repaired++;
+    else { broken++; brokenAt.push(n); }
+  }
+  return { repaired, broken, brokenAt };
 }
 
 async function testExportBarSerializes() {
@@ -2981,10 +3087,13 @@ await testPopupWarnsAboutSyncOnlyWhenTheBarSyncs();
 await testPopupExplainsAPeerHideInsteadOfOfferingRecovery();
 await testDeveloperControlsShipToNobody();
 await testDecoySettingControlsHide();
-await testTuckRoundTrip();
-await testTuckComposesWithHide();
-await testTuckRefusesWhileHidden();
-await testTuckSweepsItemsAddedLater();
+await testTuckModeConcealRoundTrip();
+await testTuckModeLeavesNothingRealOnTheBar();
+await testConcealHonoursTheToggle();
+await testTuckModeRestoreFollowsTheJournalNotTheToggle();
+await testTuckModeReassertIsIdempotent();
+await testTuckModeReconcilesAManuallyEmptiedFolder();
+await testTuckModeEndToEndShare();
 await testExportBarSerializes();
 await testExportRefusesWhileHidden();
 await testImportAddsAFolderNonDestructively();
@@ -2995,6 +3104,7 @@ await testPortableEscapesAndUnescapes();
 await testPortableToleratesMalformedInput();
 const fi = await testFaultInjection();
 const fr = await testFaultInjectionRestore();
+const ft = await testTuckModeSurvivesInterruption();
 
 console.log("=".repeat(66));
 console.log(`Skrim engine tests — ${Date.now() - t0}ms`);
@@ -3010,6 +3120,10 @@ console.log(`\n  FAULT INJECTION — RESTORE phase:`);
 console.log(`    fully repaired  : ${fr.repaired}`);
 console.log(`    NOT repaired    : ${fr.broken}`);
 if (fr.brokenAt.length) console.log(`    broken at calls : ${fr.brokenAt.join(", ")}`);
+console.log(`\n  FAULT INJECTION — TUCK hide:`);
+console.log(`    fully repaired  : ${ft.repaired}`);
+console.log(`    NOT repaired    : ${ft.broken}`);
+if (ft.brokenAt.length) console.log(`    broken at calls : ${ft.brokenAt.join(", ")}`);
 
 if (failures.length) {
   console.log(`\n  FAILURES:`);
@@ -3017,4 +3131,4 @@ if (failures.length) {
 }
 console.log("=".repeat(66));
 fs.rmSync(BUILD, { recursive: true, force: true });
-process.exit(fail === 0 && fi.broken === 0 && fr.broken === 0 ? 0 : 1);
+process.exit(fail === 0 && fi.broken === 0 && fr.broken === 0 && ft.broken === 0 ? 0 : 1);

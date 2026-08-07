@@ -238,6 +238,15 @@ body {
   scrollbar-color: var(--line-strong) transparent;
 }
 
+/* `.body` is the scroller, so its children must NOT be the give. A flex item
+ * defaults to flex-shrink: 1, so once opening Settings pushes the column past
+ * the height cap, the children squash to fit instead of the column scrolling --
+ * most visibly the fixed-height primary button, which collapsed from 40 to 24px.
+ * Holding every child to its own size is what makes the overflow scroll. */
+.body > * {
+  flex-shrink: 0;
+}
+
 /* -------------------------------------------------------------- the mark */
 
 /* The logo is the state display. Same geometry as brand/logo/state-*.svg --
@@ -712,6 +721,16 @@ body {
   gap: 8px;
 }
 
+/* The label-plus-toggle row of a stacked setting: the same shape as a plain
+ * .setting, but living inside a --stack so a full-width control can sit below
+ * it -- the tuck toggle over its folder-name field. */
+.setting__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .setting__text {
   display: flex;
   flex-direction: column;
@@ -822,6 +841,16 @@ body {
 
 .switch input:focus-visible + .switch__track {
   box-shadow: var(--ring);
+}
+
+/* Greyed when the setting does not apply -- e.g. placeholder links while the
+ * bar tucks into a folder. The stored value is untouched; this only says so. */
+.switch input:disabled {
+  cursor: not-allowed;
+}
+
+.switch input:disabled + .switch__track {
+  opacity: 0.4;
 }
 
 .settings__locked {

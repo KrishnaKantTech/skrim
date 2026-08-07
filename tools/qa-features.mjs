@@ -211,25 +211,44 @@ async function main() {
     await sleep(400);
     check("Q8", JSON.stringify(await barSnapshot(cdp, sw)) === seededSnap, "restore exact after the decoyed hide");
 
-    // ---- FEATURE 2: tuck / untuck ------------------------------------------
-    // reload the panel so tuckBtn reflects the (untucked) state, then click it
+    // ---- FEATURE 2: tuck MODE (hide INTO a folder, not the vault) ----------
+    // The toggle arms it; a hide then parks the bar into one folder that stays
+    // ON the bar. Sync-safe -- nothing is moved off to Other Bookmarks.
     await P(`document.getElementById("settings").open = false; document.getElementById("settings").open = true;`);
     await sleep(700);
-    const tuckLabel = await P(`return document.getElementById("tuckBtn").textContent.trim();`);
-    check("Q9", /tuck/i.test(tuckLabel), "tuck button reads as 'Tuck away' when untucked", tuckLabel);
-    await P(`document.getElementById("tuckName").value = "Bookmarks";`);
-    await P(`document.getElementById("tuckBtn").click();`, { userGesture: true });
-    await sleep(900);
-    const afterTuck = await barSnapshot(cdp, sw);
-    check("Q10", afterTuck.length === 1 && afterTuck[0].u === null && afterTuck[0].t === "Bookmarks",
-      "tuck leaves the bar holding one folder", JSON.stringify(afterTuck.map(n => n.t)));
-    check("Q11", afterTuck[0].c.length === SEED.length, "with every bar item inside it", `${afterTuck[0]?.c?.length} inside`);
-    const tuckedLabel = await P(`return document.getElementById("tuckBtn").textContent.trim();`);
-    check("Q12", /move back/i.test(tuckedLabel), "and the button flips to 'Move back to the bar'", tuckedLabel);
+    const tuckInit = await P(`return document.getElementById("tuckToggle").checked;`);
+    check("Q9", tuckInit === false, "settings panel: tuck toggle defaults to off", `checked=${tuckInit}`);
 
-    await P(`document.getElementById("tuckBtn").click();`, { userGesture: true });
-    await sleep(900);
-    check("Q13", JSON.stringify(await barSnapshot(cdp, sw)) === seededSnap, "untuck restores the bar byte-identically");
+    // type a custom folder name (fires the debounced save), then flip it on.
+    // Click the VISIBLE track, not the input: the track paints over the checkbox,
+    // so clicking the input directly would pass even if the row were not a proper
+    // <label for> and a real cursor click landed on the track and did nothing.
+    await P(`const f = document.getElementById("tuckName"); f.value = "My Links"; f.dispatchEvent(new Event("input", { bubbles: true }));`);
+    await sleep(600);
+    await P(`document.querySelector('label[for="tuckToggle"] .switch__track').click();`, { userGesture: true });
+    await sleep(400);
+    const tcfg = await msg({ type: "getSettings" });
+    check("Q10", tcfg.tuckMode === true && tcfg.tuckName === "My Links",
+      "toggling on stores tuckMode:true and the typed folder name", JSON.stringify({ tuckMode: tcfg.tuckMode, tuckName: tcfg.tuckName }));
+
+    // a hide now TUCKS: the bar holds one folder, everything inside it, no vault
+    await msg({ type: "conceal" });
+    await sleep(500);
+    const afterTuck = await barSnapshot(cdp, sw);
+    const vaultCount = await aeval(cdp, sw, `return (await chrome.bookmarks.search({})).filter(n => !n.url && /^Skrim —/.test(n.title)).length;`);
+    const tuckStatus = await msg({ type: "status" });
+    check("Q11", afterTuck.length === 1 && afterTuck[0].u === null && afterTuck[0].t === "My Links" && afterTuck[0].c.length === SEED.length,
+      "hiding leaves the bar holding one folder with every item inside it", `${JSON.stringify(afterTuck.map(n => n.t))}; ${afterTuck[0]?.c?.length} inside`);
+    check("Q12", vaultCount === 0 && tuckStatus.mode === "tuck",
+      "and nothing was moved off to a vault (the sync-safe win)", JSON.stringify({ vaults: vaultCount, mode: tuckStatus.mode }));
+
+    await msg({ type: "restore" });
+    await sleep(500);
+    check("Q13", JSON.stringify(await barSnapshot(cdp, sw)) === seededSnap, "restoring untucks the bar byte-identically");
+
+    // leave tuck mode off for the backup tests that follow
+    await P(`document.querySelector('label[for="tuckToggle"] .switch__track').click();`, { userGesture: true });
+    await sleep(300);
 
     // ---- FEATURE 3: backup page --------------------------------------------
     const backup = await openTab(cdp, `chrome-extension://${extId}/backup.html`);

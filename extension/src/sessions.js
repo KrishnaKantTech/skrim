@@ -123,7 +123,10 @@ async function mutate(fn) {
 
   let result = null;
   try {
-    if (after > 0 && (force || before === 0)) result = await engine.hide();
+    // conceal(), not hide(): the automatic share-hide honours the tuck toggle,
+    // parking the bar into a folder instead of a vault when the user asked for
+    // that. restore() is mode-aware and puts back whichever one ran.
+    if (after > 0 && (force || before === 0)) result = await engine.conceal();
     // Restore only on the transition, never on a beat that merely confirms
     // nothing is sharing -- that would fight a hide made from the popup.
     else if (after === 0 && before > 0) result = await engine.restore();
