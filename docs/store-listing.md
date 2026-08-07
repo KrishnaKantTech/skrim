@@ -250,9 +250,15 @@ the exact size.
 | Screenshot 4 | `brand/store/screenshot-4-privacy.png` | 1280×800 |
 | Screenshot 5 | `brand/store/screenshot-5-coverage.png` | 1280×800 |
 | Small promo tile | `brand/store/promo-tile-440x280.png` | 440×280 |
+| Marquee promo tile | `brand/store/marquee-tile-1400x560.png` | 1400×560 |
 
-No marquee tile (1400×560). That field only matters if the extension is
-featured, and it can be added later without touching anything else here.
+The marquee is only shown if the extension is featured, and it is the one field
+that can be filled in later without touching anything else. It is built anyway,
+because the featured carousel is the only surface where the tile is seen before
+the name, and because an editor looking for something to feature will not wait
+while one is made. It is the small tile at poster scale — same scrim, same
+geometry — with nothing load-bearing outside the centre 1120px, which is what
+the carousel crops to on a narrow viewport.
 
 Regenerate with `node tools/make-store-assets.mjs`; `brand/store/README.md`
 covers the rest. Three things about them are worth knowing before a reviewer
@@ -277,6 +283,45 @@ reads them:
 `node tools/check-listing.mjs` reads the PNG headers back and fails if a file is
 missing, off-size, or blank, and it fails if the stand-in bookmarks drawn in
 screenshot 2 stop matching `DECOYS` in `extension/src/engine.js`.
+
+---
+
+## Promotional video
+
+**This field is not an upload.** It takes a YouTube URL, and only YouTube. The
+master is built by `node tools/make-promo-video.mjs` into `brand/video/`:
+
+| file | what it is |
+| --- | --- |
+| `brand/video/skrim-promo.mp4` | 1920×1080, 30fps, 36s, H.264, silent |
+| `brand/video/skrim-promo-poster-1280x720.png` | the YouTube custom thumbnail |
+
+```
+Promotional video   https://www.youtube.com/watch?v=REPLACE_ME
+```
+
+Upload it **public**, not unlisted — the dashboard rejects a video it cannot
+resolve, and an unlisted video that later goes private empties the field
+silently. Use the long `watch?v=` form; the `youtu.be` short form has been
+refused. Turn off end screens and cards: they render on top of the last five
+seconds, which is the whole end card. `brand/video/README.md` carries the
+suggested YouTube title and description.
+
+Two things about the film are the same claims as the screenshots, and are worth
+knowing for the same reason:
+
+- **It depicts a whole-screen share, not a tab share.** `extension/src/hook.js`
+  releases the hide the moment Chrome reports `displaySurface === "browser"`,
+  because a captured tab cannot contain the bookmarks bar. A film showing the
+  bar held down for the length of a tab share would advertise behaviour the
+  extension deliberately does not have.
+- **Nothing on screen is invented extension UI.** No toast, no progress bar, no
+  badge — the extension raises none of those. The popup in the film is the real
+  popup, in an iframe, exactly as it is in the screenshots, and the browser
+  around it is the same generic drawing.
+
+The film also carries the *not covered* list and the sync disclosure out loud,
+in scenes 4 and 5, for the same reason screenshots 4 and 5 do.
 
 ---
 

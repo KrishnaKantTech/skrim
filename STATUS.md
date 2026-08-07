@@ -259,7 +259,8 @@ refuses a re-upload at a version it has already seen, which is exactly the wall
 you hit mid-rejection-round when you are least in the mood for it.
 
 **The store images are built**: `brand/store/`, five screenshots at 1280×800
-and the small promo tile at 440×280, from `tools/make-store-assets.mjs`. The
+the small promo tile at 440×280 and the marquee tile at 1400×560, from
+`tools/make-store-assets.mjs`. The
 popup in them is the real popup — `popup-preview.mjs` already serves the shipped
 `popup.{html,css,js}` against stubbed fixtures, so the generator mounts that
 same handler behind its own routes and iframes the result, same-origin so it can
@@ -302,7 +303,58 @@ undoing by accident:
   first thing that would falsify them, and a false data disclosure is a
   takedown rather than a rejection.
 
-`node tools/check-listing.mjs` (~0.1s, 24 checks) is what holds both. It
+**The marquee tile is built** (`brand/store/marquee-tile-1400x560.png`). That
+field only matters if the extension is featured, and it can be added later
+without touching anything else — it exists now because the featured carousel is
+the only surface where the tile is seen *before* the name, and an editor looking
+for something to feature will not wait while one is made. It is the small tile
+at poster scale rather than a second idea: same scrim at the mark's own 41%,
+same lit edge, same titles caught half-way through being swallowed. Two things
+about it come from where it is shown and should not be "tidied" away — nothing
+load-bearing sits outside the centre 1120px, because the carousel crops from the
+sides on a narrow viewport; and the chip field fades into the ground at the
+bottom rather than being cut by the frame, because a row sliced through its own
+letterforms reads as a rendering fault.
+
+**The promo video is built**: `brand/video/skrim-promo.mp4`, 1920×1080, 30fps,
+36 seconds, silent, from `tools/make-promo-video.mjs`, plus a 1280×720 poster
+for the YouTube thumbnail. **The store's video field is a YouTube URL, not an
+upload** — `brand/video/README.md` carries that errand, including the two ways
+it goes wrong (an unlisted video that later goes private empties the field
+silently, and end screens render on top of the last five seconds).
+
+Same anti-drift property as the screenshots, and by the same means: the film
+imports its browser mock, bookmarks bar, colours and copy lists straight out of
+`make-store-assets.mjs`, and iframes the **real popup** off `popup-preview.mjs`.
+There is no second drawing of a bookmarks bar in this repo. Four things about it
+are decisions rather than accidents:
+
+- **It depicts a whole-screen share, not a tab share.** `src/hook.js` releases
+  the hide the moment Chrome reports `displaySurface === "browser"`, so a film
+  showing the bar held down for the length of a tab share would be advertising
+  behaviour the extension deliberately does not have. Hence the "Sharing your
+  screen" pill rather than the screenshots' "Sharing this tab". **Screenshot 2
+  says "Sharing this tab" beside a bar that stays hidden and a popup reading
+  "Hidden for 4 mins", which is the same mismatch — worth a one-word fix in
+  `make-store-assets.mjs` next time that file is opened.**
+- **Nothing on screen is invented extension UI.** No toast, no progress bar, no
+  badge, because the extension raises none of those.
+- **`FIXTURES.justHidden` exists for the film.** `shielded` reads "Hidden for 4
+  mins", and four minutes two seconds after the viewer watched the bar clear is
+  a continuity error. It is also the only preview state that reaches
+  `elapsed()`'s under-a-minute branch.
+- **Every animation is a paused Web Animation with an explicit delay**, so
+  `seek(t)` is the whole clock — no wall time, no rAF, no `setTimeout`. One
+  headless Chrome is held open over CDP and driven frame by frame at dsf=2
+  (3840×2160, supersampled down by ffmpeg). Frame 480 is identical whether it is
+  rendered first or last, which is the only reason a 1080-frame render can be
+  trusted without watching all 36 seconds. ~3 minutes end to end.
+  The one trap: the popup's CSS transitions must be `finish()`ed, not pinned to
+  `currentTime = 0` — pinned to zero they render the empty shell the popup shows
+  for one frame before its stubbed `sendMessage` resolves, which put an outline
+  button where the shipped one is a green fill.
+
+`node tools/check-listing.mjs` (~0.1s, 45 checks) is what holds both. It
 re-measures every field against Chrome's real caps — the 1000-char cap on the
 justification fields is the one that bites, and three of them were over it when
 first written — diffs the summary against the manifest, re-runs the egress and
@@ -310,7 +362,11 @@ remote-resource greps, asserts `RECOVERY_BASE` is still `null`, and fails if a
 permission is added to the manifest without a justification (or justified after
 being dropped). Mutation-tested like everything else: a `fetch()` in `sw.js`, a
 drifted `description`, a hosted `RECOVERY_BASE` and a new unjustified
-permission were each injected and each turned it red.
+permission were each injected and each turned it red. It also now reads the
+marquee tile's header, checks the video master is a real `ftyp` mp4 rather than
+a truncated render, checks the poster is exactly 1280×720, and checks the
+film's popup fixture still agrees with the numbers the film's captions say out
+loud.
 
 **The privacy policy is written**: `site/privacy.html`, self-contained like
 `restore.html`. It already carries the permission justifications (`bookmarks`,

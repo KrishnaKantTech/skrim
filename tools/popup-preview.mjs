@@ -140,6 +140,18 @@ export const FIXTURES = {
   },
 };
 
+// The same state a few seconds in, which is the moment tools/make-promo-video.mjs
+// depicts: the share has just started and the bar has just cleared. `shielded`
+// says "Hidden for 4 mins", and four minutes two seconds after the viewer
+// watched the bar clear is a continuity error in a 36-second story.
+//
+// It is also the only preview that reaches elapsed()'s under-a-minute branch,
+// which returns "just now" -- a string no other fixture renders.
+FIXTURES.justHidden = {
+  ...FIXTURES.shielded,
+  status: { ...FIXTURES.shielded.status, since: now - 15_000 },
+};
+
 const stub = (name) => `<script>
   const F = ${JSON.stringify(FIXTURES)}[${JSON.stringify(name)}] ?? {};
   window.chrome = {

@@ -129,10 +129,10 @@ your other device, Skrim explains what happened and offers to bring the bar back
 | | |
 | --- | --- |
 | `extension/` | The extension. No network code, ever — see above. |
-| `tools/` | The test suite, the mutation testers, the two harnesses that drive a real Chrome (`live-test` for the mechanism, `store-install-test` for the shipped shape of it), and the generators that build the store assets and social covers from the same geometry as the logo. |
+| `tools/` | The test suite, the mutation testers, the two harnesses that drive a real Chrome (`live-test` for the mechanism, `store-install-test` for the shipped shape of it), and the generators that build the store assets, the promo film and the social covers from the same geometry as the logo. |
 | `site/` | skrim.app's pages. `privacy.html` is linked from the store listing; `restore.html` is what a receipt URL resolves to, so it has to keep working for as long as anyone holds one. |
 | `worker/` | The Cloudflare Worker serving skrim.app: host canonicalisation, the waitlist endpoint, security headers. |
-| `brand/` | Logo geometry, tokens, store screenshots, social covers. All generated. |
+| `brand/` | Logo geometry, tokens, store screenshots and tiles, the promo film, social covers. All generated. |
 | `probe/` | The throwaway extension from the Chrome Sync spike. Kept because `M0-FINDINGS.md` refers to it. |
 | `STATUS.md` | The engineering log. Long, specific, and the honest record rather than a summary. |
 | `M0-FINDINGS.md` | What the Chrome Sync fan-out spike actually found. |

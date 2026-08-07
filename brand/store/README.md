@@ -19,9 +19,17 @@ will want them; the dashboard rejects anything that is not the exact size.
 | `screenshot-4-privacy.png` | 1280×800 | Screenshot 4 |
 | `screenshot-5-coverage.png` | 1280×800 | Screenshot 5 |
 | `promo-tile-440x280.png` | 440×280 | Small promo tile |
+| `marquee-tile-1400x560.png` | 1400×560 | Marquee promo tile |
 
-Nothing here needs a marquee tile (1400×560) — that field is only used if the
-extension is featured, and it can be added later without touching the listing.
+The marquee is only shown if the extension is featured, and it is the one field
+that can be filled in later without touching anything else. It is here now
+because the carousel is the one surface where the tile is seen *before* the
+name, and because a Google editor looking for something to feature will not
+wait while one is made.
+
+**The promo video field is not a file.** It takes a YouTube URL. The master is
+built by `tools/make-promo-video.mjs` into `brand/video/` — see the README
+there for what to upload and what to put in the YouTube fields.
 
 ## The popup in these images is the real popup
 
@@ -60,6 +68,24 @@ disagree.
   `extension/src/engine.js`. Add a decoy there without re-running the generator
   and that image shows a bar the extension never produces — a misleading
   screenshot, not a cosmetic drift
+
+## The marquee is the small tile at poster scale, on purpose
+
+Same object, same geometry: the scrim parked at the mark's own 41%, the lit
+leading edge, the titles caught half-way through being swallowed. It is not a
+second idea, because the two are seen in the same listing and a listing whose
+tiles argue with each other looks like two products.
+
+Three things are different, and all three come from where it is shown:
+
+- **Nothing load-bearing sits outside x 140..1260.** The carousel crops the tile
+  from the sides on a narrow viewport. The bookmark field is what runs off the
+  edges, which is fine — it is supposed to feel like it carries on past the
+  frame.
+- **The field fades into the ground at the bottom** rather than being cut by it.
+  A row of chips sliced through its own letterforms reads as a rendering fault.
+- **The mono line carries the proof.** At 440px there is no room for it; at
+  1400px the band is otherwise 600px of empty green.
 
 ## Colour
 

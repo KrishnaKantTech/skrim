@@ -24,7 +24,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { IMAGES, DECOYS } from "./make-store-assets.mjs";
+import { IMAGES, DECOYS, EXPOSED } from "./make-store-assets.mjs";
+import { FIXTURES } from "./popup-preview.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LISTING = path.join(ROOT, "docs/store-listing.md");
@@ -252,6 +253,63 @@ for (const img of IMAGES) {
     `${(meta.bytes / 1024).toFixed(0)} KB -- suspiciously small for a rendered composition`,
   );
 }
+
+console.log("\nPromo video\n");
+
+// Not a dashboard image -- the store's video field takes a YouTube URL -- but
+// the two files behind that URL rot the same way the PNGs do, and they rot
+// silently because nobody re-watches 36 seconds before a resubmit. So: the
+// master exists and is not a stub, and the thumbnail is exactly the size
+// YouTube's custom-thumbnail upload demands.
+const VIDEO = path.join(ROOT, "brand/video");
+const mp4 = path.join(VIDEO, "skrim-promo.mp4");
+if (!fs.existsSync(mp4)) {
+  bad("skrim-promo.mp4", "missing -- run `node tools/make-promo-video.mjs`");
+} else {
+  const bytes = fs.statSync(mp4).size;
+  // The ftyp box, at offset 4. A truncated or half-written render is the
+  // failure this catches, and it is the same four bytes a player reads.
+  const head = fs.readFileSync(mp4).subarray(4, 8).toString("latin1");
+  check("skrim-promo.mp4 is an mp4", head === "ftyp", `starts ${JSON.stringify(head)}`);
+  check(
+    "skrim-promo.mp4 is not a stub",
+    bytes > 400_000,
+    `${(bytes / 1048576).toFixed(1)} MB -- too small for 36s of 1080p`,
+  );
+}
+
+const posterFile = path.join(VIDEO, "skrim-promo-poster-1280x720.png");
+if (!fs.existsSync(posterFile)) {
+  bad("skrim-promo-poster-1280x720.png", "missing -- run `node tools/make-promo-video.mjs`");
+} else {
+  const meta = png(posterFile);
+  check(
+    "poster is 1280x720",
+    meta && meta.w === 1280 && meta.h === 720,
+    meta ? `${meta.w}x${meta.h}` : "not a PNG",
+  );
+  check(
+    "poster is not blank",
+    meta && meta.bytes > 20_000,
+    meta ? `${(meta.bytes / 1024).toFixed(0)} KB` : "not a PNG",
+  );
+}
+
+// The film says the numbers out loud -- "12 bookmarks moved into a folder, 6
+// forgettable stand-ins took their place" -- with the real popup on screen
+// beside the caption reading `12 bookmarks` and `6 items`. The caption is built
+// from these two arrays and the popup from this fixture, so this is the check
+// that the two still agree. make-store-assets.mjs makes the same check for
+// `shielded`, which is the screenshots' state; this is the film's.
+const film = FIXTURES.justHidden?.status;
+check(
+  "film's popup fixture matches the film's captions",
+  film?.itemsDisplaced === EXPOSED.length && film?.bars?.[0]?.children === DECOYS.length,
+  film
+    ? `caption says ${EXPOSED.length} tucked and ${DECOYS.length} standing in, ` +
+      `popup says ${film.itemsDisplaced} and ${film.bars?.[0]?.children}`
+    : "FIXTURES.justHidden is gone -- tools/make-promo-video.mjs renders it",
+);
 
 // Screenshot 2 draws the stand-in bookmarks the extension leaves on the bar. If
 // engine.js grows, drops or renames one, that image shows a bar the extension

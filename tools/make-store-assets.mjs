@@ -2,8 +2,9 @@
 //
 //   node tools/make-store-assets.mjs
 //
-// Five screenshots at 1280x800 and the small promo tile at 440x280 -- the exact
-// sizes the Developer Dashboard accepts, written out to brand/store/.
+// Five screenshots at 1280x800, the small promo tile at 440x280 and the marquee
+// tile at 1400x560 -- the exact sizes the Developer Dashboard accepts, written
+// out to brand/store/.
 //
 // The store has no caption field: whatever a screenshot says, it says inside
 // the PNG. So each one carries its own headline, and the five are ordered as an
@@ -60,7 +61,7 @@ const PORT = Number(process.env.PORT ?? 8749);
 
 // Lifted from brand/tokens.css, same subset make-social.mjs uses and named the
 // same, so a retune there is a find-and-replace here.
-const T = {
+export const T = {
   green400: "#17DE82", // core fill -- the scrim
   green200: "#8DF7C2", // the lit leading edge
   ink950: "#0A100E", // ground, and type on green
@@ -81,14 +82,14 @@ const H = 800;
 const PAD = 72;
 const SCRIM_H = 92; // the band. Shallower than the mark's 41% -- at 800px tall
 //                     that much green would outweigh the product under it.
-const POPUP_W = 336; // extension/popup.css: body { width: 336px }
+export const POPUP_W = 336; // extension/popup.css: body { width: 336px }
 
 // ------------------------------------------------------------------- copy
 
 // The nine that hurt, in roughly the order you would hate explaining them.
 // Short enough to read on a bookmarks bar, which is the whole point of the
 // screenshot -- a bar of lorem ipsum proves nothing.
-const EXPOSED = [
+export const EXPOSED = [
   "Salary negotiation",
   "Indeed · Senior roles",
   "Am I underpaid?",
@@ -124,17 +125,17 @@ if (EXPOSED.length !== ON_BAR || TUCKED !== ON_BAR) {
 
 // -------------------------------------------------------------- components
 
-const initial = (s) => (s.match(/[a-zA-Z]/)?.[0] ?? "•").toUpperCase();
+export const initial = (s) => (s.match(/[a-zA-Z]/)?.[0] ?? "•").toUpperCase();
 
 /**
  * One bookmarks-bar item. `tone` is the favicon square: neutral steps only.
  * Decoys get the flattest tone in the set because being unremarkable is their
  * entire job.
  */
-const bookmark = (label, tone) =>
+export const bookmark = (label, tone) =>
   `<div class="bm"><span class="favi" style="background:${tone}">${initial(label)}</span>${label}</div>`;
 
-const TONES = [T.ink600, T.ink500, T.ink400];
+export const TONES = [T.ink600, T.ink500, T.ink400];
 
 /**
  * A bookmarks bar. Overflows its box on purpose when there are too many items:
@@ -146,7 +147,7 @@ const TONES = [T.ink600, T.ink500, T.ink400];
  * there is more hidden off-screen -- on the one image whose entire claim is
  * that there is not.
  */
-const bar = (labels, { decoy = false, chev = labels.length > 6 } = {}) =>
+export const bar = (labels, { decoy = false, chev = labels.length > 6 } = {}) =>
   `<div class="bar">` +
   labels.map((l, i) => bookmark(l, decoy ? T.ink700 : TONES[i % TONES.length])).join("") +
   (chev ? `<div class="chev">»</div>` : "") +
@@ -156,7 +157,7 @@ const bar = (labels, { decoy = false, chev = labels.length > 6 } = {}) =>
  * The generic browser. Tab strip, omnibox, bookmarks bar, page. Everything
  * above the bar exists only to make the bar read as a bookmarks bar.
  */
-const browser = ({ labels, decoy = false, sharing = false, tab }) => `
+export const browser = ({ labels, decoy = false, sharing = false, tab, pill = "Sharing this tab" }) => `
 <div class="win">
   <div class="tabs">
     <div class="tab on"><span class="tfav"></span>${tab}</div>
@@ -171,7 +172,7 @@ const browser = ({ labels, decoy = false, sharing = false, tab }) => `
   </div>
   ${bar(labels, { decoy })}
   <div class="page">
-    ${sharing ? `<div class="live"><span class="dot"></span>Sharing this tab</div>` : ""}
+    ${sharing ? `<div class="live"><span class="dot"></span>${pill}</div>` : ""}
     <div class="ph"></div>
     ${[[92, 86, 74], [88, 94, 79, 58], [90, 72, 44]]
       .map(
@@ -200,7 +201,7 @@ const strip = (label, note, inner, { covered = false } = {}) => `
 </div>`;
 
 /** A statement card. The green hairline on top is the mark's leading edge. */
-const statCard = (head, body) =>
+export const statCard = (head, body) =>
   `<div class="stat"><h3>${head}</h3><p>${body}</p></div>`;
 
 // ------------------------------------------------------------------ layout
@@ -231,8 +232,27 @@ const shot = ({ kicker, headline, sub, stage, foot = null }) => `
   ${foot ? `<div class="foot">${foot}</div>` : ""}
 </div>`;
 
+/**
+ * brand/logo/mark-line.svg, inlined the same way, and `color` is what its
+ * `currentColor` resolves to.
+ *
+ * This is the mark for a GREEN ground, and the reason is in the geometry above:
+ * the primary mark's scrim IS green, so on a green surface the lid disappears
+ * into the background and the mark reads as a notched square. The line mark
+ * keeps the whole silhouette in one colour. Floor is 24px -- below that the
+ * content lines mush, and `mark-min.svg` is the answer instead.
+ */
+export const markLine = (size, color = T.ink950) =>
+  `<svg width="${size}" height="${size}" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" style="color:${color}">` +
+  `<defs><clipPath id="ml${size}"><rect x="2" y="2" width="28" height="28" rx="6"/></clipPath></defs>` +
+  `<rect x="7.5" y="14.5" width="15" height="3" rx="1.5" fill="currentColor" opacity=".5"/>` +
+  `<rect x="7.5" y="20.5" width="10" height="3" rx="1.5" fill="currentColor" opacity=".5"/>` +
+  `<g clip-path="url(#ml${size})"><rect x="2" y="2" width="28" height="11.5" fill="currentColor"/></g>` +
+  `<rect x="3.125" y="3.125" width="25.75" height="25.75" rx="4.875" fill="none" stroke="currentColor" stroke-width="2.25"/>` +
+  `</svg>`;
+
 // brand/logo/mark-primary.svg, inlined so the page has no external refs.
-const mark = (size) =>
+export const mark = (size) =>
   `<svg width="${size}" height="${size}" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">` +
   `<defs><clipPath id="mk${size}"><rect x="2" y="2" width="28" height="28" rx="6"/></clipPath></defs>` +
   `<rect x="2" y="2" width="28" height="28" rx="6" fill="${T.ink950}"/>` +
@@ -363,9 +383,67 @@ const TILE = () => `
   <div class="tedge"></div>
 </div>`;
 
+// ----------------------------------------------------------- marquee tile
+
+// 1400x560, the featured-carousel slot. Three things about where it is shown
+// decided the composition:
+//
+//   1. It is seen BIG and for about a second, alongside other featured
+//      extensions. One idea, stated at poster scale, beats three lines of copy.
+//   2. The carousel crops it from the sides on a narrow viewport, so nothing
+//      load-bearing may sit outside the centre ~1120 -- x 140..1260 here. What
+//      runs off the edges is the bookmark field, which is supposed to feel like
+//      it carries on past the frame anyway.
+//   3. It sits next to `promo-tile-440x280.png` in the same listing, so it is
+//      the same object at a different size rather than a second idea: the scrim
+//      parked at the mark's own 41%, the lit leading edge, and the titles it is
+//      half-way through swallowing.
+//
+// The browser frame the screenshots use is deliberately absent. At 440px it was
+// left out for room; here it is left out because the moment this tile has to
+// land is what the scrim does, and a tab strip and an omnibox are two more
+// things for the eye to resolve before it gets there.
+const MQ_H = 560;
+const MQ_BAND = 250; // 44.6% -- the mark's 41% plus the room the tagline needs.
+//                      Any deeper and the tile is a green rectangle with a
+//                      footnote; any shallower and the wordmark crowds the edge.
+const MQ_SIDE = 170; // the crop-safe margin, and the field's left edge minus a
+//                      row offset, so the chips read as running under the type.
+//                      140 put the mark exactly on the 1120-crop boundary --
+//                      surviving the crop by nothing at all is not surviving it.
+const MQ_CUT = 22; // how far into the top row of chips the scrim has come. Tuned
+//                    against the type: the letters are clipped but still read,
+//                    which is what "mid-swallow" has to look like. Any deeper
+//                    and the row is a set of broken boxes.
+
+const MARQUEE = () => `
+<div class="mq">
+  <div class="mqfield">
+    ${[0, 5, 2, 8, 4, 10]
+      .map((n) => [...EXPOSED.slice(n), ...EXPOSED.slice(0, n)].slice(0, 5))
+      .map(
+        (row, i) =>
+          `<div class="mqrow${i % 2 ? " off" : ""}">` +
+          row.map((l, j) => bookmark(l, TONES[j % TONES.length])).join("") +
+          `</div>`,
+      )
+      .join("")}
+  </div>
+  <div class="mqband">
+    <div class="lock">${mark(62)}<span class="word">Skrim</span></div>
+    <div class="mqsay">
+      <p class="mqline">Bookmarks bar off while you share.</p>
+      <p class="mqproof">no account · no servers<br>no network requests at all</p>
+    </div>
+  </div>
+  <div class="mqedge"></div>
+  <div class="mqfall"></div>
+  <div class="mqfade"></div>
+</div>`;
+
 // ---------------------------------------------------------------- document
 
-const STYLE = `
+export const STYLE = `
 @font-face { font-family:"Instrument Sans"; font-weight:400 700; font-display:block;
   src:url("/fonts/InstrumentSans-latin.woff2") format("woff2"); }
 @font-face { font-family:"Geist Mono"; font-weight:100 900; font-display:block;
@@ -547,6 +625,54 @@ body { font-family:"Instrument Sans", -apple-system, sans-serif;
 .tline { font-size:15px; font-weight:500; letter-spacing:-.012em; opacity:.78; }
 .tedge { position:absolute; left:0; right:0; top:90px; height:3px; background:${T.green200};
   box-shadow:0 5px 16px -4px rgba(141,247,194,.45); }
+
+/* ---------------------------------------------------------- marquee tile */
+
+.mq { position:relative; width:1400px; height:${MQ_H}px; overflow:hidden;
+  background:${T.ink950}; }
+
+/* The field runs off three edges. A field that stops inside the frame is a
+   diagram of a bookmarks bar; one that runs off it is a bar. */
+.mqfield { position:absolute; left:${MQ_SIDE}px; right:0;
+  top:${MQ_BAND + 4 - MQ_CUT}px; display:flex; flex-direction:column; gap:12px; }
+.mqrow { display:flex; gap:11px; white-space:nowrap; }
+.mqrow.off { margin-left:-88px; }
+.mq .bm { height:48px; padding:0 15px; gap:10px; border-radius:10px; font-size:17px;
+  background:${T.ink900}; border:1px solid ${T.ink800}; color:${T.ink300}; }
+.mq .favi { width:20px; height:20px; border-radius:6px; font-size:11.5px; }
+
+/* Type on the fill is ink, never white: white on green-400 measures 1.78:1. */
+.mqband { position:absolute; left:0; right:0; top:0; height:${MQ_BAND}px;
+  background:${T.green400}; color:${T.ink950}; box-sizing:border-box;
+  padding:0 ${MQ_SIDE}px; display:flex; flex-direction:column;
+  justify-content:center; }
+.mq .lock { gap:20px; }
+.mq .lock svg { border-radius:5px; }
+.mq .word { font-size:62px; letter-spacing:-.038em; }
+/* The tagline and the proof share a baseline, which is also what stops the
+   band from being left-heavy with 600px of empty green on the right. */
+.mqsay { margin-top:26px; display:flex; align-items:flex-end;
+  justify-content:space-between; gap:56px; }
+.mqline { margin:0; flex:none; white-space:nowrap; font-size:36px; line-height:1.1;
+  font-weight:600; letter-spacing:-.032em; }
+/* Ink at .70 on green-400 measures 5.50:1 -- the quietest this line is allowed
+   to go and still clear AA. White would be 1.78:1. */
+.mqproof { margin:0; text-align:right; font-family:var(--mono); font-size:17px;
+  font-weight:500; line-height:1.5; letter-spacing:.005em; opacity:.7; }
+
+/* The leading edge sits just below the fill, so on the dark ground it is a lit
+   hairline and the light falls onto what the scrim is about to cover. */
+.mqedge { position:absolute; left:0; right:0; top:${MQ_BAND}px; height:4px;
+  background:${T.green200}; box-shadow:0 8px 30px -4px rgba(141,247,194,.45); }
+.mqfall { position:absolute; left:0; right:0; top:${MQ_BAND + 4}px; height:96px;
+  background:linear-gradient(rgba(23,222,130,.09), rgba(23,222,130,0));
+  pointer-events:none; }
+/* The field dissolves into the ground rather than being chopped by the frame.
+   A bottom row cut through its own letterforms reads as a rendering fault; the
+   same row fading out reads as a bar that carries on past the tile, which is
+   the true thing about anybody's bookmarks bar. */
+.mqfade { position:absolute; left:0; right:0; bottom:0; height:132px;
+  background:linear-gradient(rgba(10,16,14,0), ${T.ink950} 78%); }
 `;
 
 /**
@@ -597,11 +723,13 @@ const page = (body) =>
 export const IMAGES = [
   ...SHOTS.map((s) => ({ file: `${s.name}.png`, w: W, h: H, field: "Screenshot" })),
   { file: "promo-tile-440x280.png", w: 440, h: 280, field: "Small promo tile" },
+  { file: "marquee-tile-1400x560.png", w: 1400, h: 560, field: "Marquee promo tile" },
 ];
 
 const ROUTES = new Map([
   ...SHOTS.map((s) => [`/shot/${s.name}`, () => page(shot(s))]),
   ["/shot/promo-tile", () => page(TILE())],
+  ["/shot/marquee-tile", () => page(MARQUEE())],
 ]);
 
 /** dsf=2 render, then down to the nominal size the dashboard demands. */
@@ -653,6 +781,7 @@ async function main() {
   const base = `http://localhost:${PORT}`;
   for (const s of SHOTS) await capture(`${base}/shot/${s.name}`, join(OUT, `${s.name}.png`), W, H);
   await capture(`${base}/shot/promo-tile`, join(OUT, "promo-tile-440x280.png"), 440, 280);
+  await capture(`${base}/shot/marquee-tile`, join(OUT, "marquee-tile-1400x560.png"), 1400, 560);
 
   // The composition HTML, kept for a look in a real browser.
   const work = join(tmpdir(), `skrim-store-${process.pid}`);
