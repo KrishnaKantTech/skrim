@@ -86,8 +86,15 @@ const markPrimary = (size) =>
 // fear, position on the polish. So the polish line goes in the green -- the
 // one thing a reader takes from a thumbnail -- and the fear is carried
 // wordlessly by the bookmarks caught under the scrim's edge.
-const HEADLINE = "Presenter Mode for your whole Mac.";
-const SUB = "One keystroke covers all of it — and puts it back exactly where it was.";
+//
+// The headline says *automatic* because that is the whole reason to install
+// this over doing nothing: the competitor is the keyboard shortcut you have to
+// remember, and the one time it matters is the time you forget. Which is also
+// why there are no keycaps on the card any more -- a keystroke on the artwork
+// would sell the exact thing the product replaces.
+const HEADLINE = "Your bookmarks bar hides itself the moment you share your screen.";
+const SUB = "And every bookmark goes back exactly where it was.";
+const TAGS = ["Chrome extension · free", "no network calls"];
 const DOMAIN = "skrim.app";
 
 // The nightmare, roughly in order of how much you would hate explaining it.
@@ -159,9 +166,9 @@ const chipField = (rows, perRow) => {
   );
 };
 
-const keycaps = (keys) =>
+const tags = (items) =>
   `<div class="keys">` +
-  keys.map((k) => `<kbd>${k}</kbd>`).join("") +
+  items.map((t) => `<span class="tag">${t}</span>`).join("") +
   `</div>`;
 
 // ------------------------------------------------------------------ layout
@@ -233,7 +240,7 @@ function card({
       ? ""
       : `<div class="bottom" style="left:${bottomLeft ?? padX}px;right:${padX}px;top:${bottomAt}px">
     <p style="font-size:${subSize}px${subWidth ? `;max-width:${subWidth}px` : ""}">${SUB}</p>
-    ${keycaps(["⌘", "⇧", "H"])}
+    ${tags(TAGS)}
   </div>`
   }
   ${domainInScrim ? "" : `<div class="domain loose" style="right:${padX}px;bottom:${padY}px">${DOMAIN}</div>`}
@@ -326,12 +333,15 @@ h1 { margin:0; font-weight:700; letter-spacing:-.035em; color:${T.ink950};
 .bottom p { margin:0; color:${T.ink400}; font-weight:450; letter-spacing:-.01em; }
 
 .keys { display:flex; gap:7px; flex:none; }
-kbd {
-  display:flex; align-items:center; justify-content:center;
-  min-width:34px; height:34px; padding:0 9px; box-sizing:border-box;
+/* Neutral, never green: these are facts about the product, not the covered
+   state. Same chip vocabulary as the bookmark field so the card reads as one
+   object rather than a poster with a badge stuck on it. */
+.tag {
+  display:flex; align-items:center; justify-content:center; white-space:nowrap;
+  height:34px; padding:0 13px; box-sizing:border-box;
   border-radius:8px; background:${T.ink900};
   border:1px solid ${T.ink700}; border-bottom-color:${T.ink600};
-  color:${T.ink100}; font-family:var(--mono); font-size:15px; font-weight:500;
+  color:${T.ink300}; font-family:var(--mono); font-size:14px; font-weight:500;
 }
 </style></head><body>${body}</body></html>`;
 }
@@ -380,7 +390,9 @@ const SQUARE = () => {
     markSize: 50, wordSize: 39, headSize: 78, headWidth: 830, headLead: 1.0,
     chipTop: scrimH - 17,
     chipH: 46, chipGap: 15, chipRows: 7, chipPerRow: 7, chipSize: 18,
-    subSize: 24, subWidth: 620, bottomAt: 930,
+    // Narrow enough that the line breaks evenly in two rather than dropping a
+    // single orphaned word under a full line.
+    subSize: 24, subWidth: 400, bottomAt: 924,
   });
 };
 
@@ -433,6 +445,15 @@ async function main() {
     console.log(`${ok ? "ok  " : "BAD "} ${cut.name}  ${px}  (+ 1x)`);
     if (!ok) process.exitCode = 1;
   }
+
+  // The OG cut is the only one the website itself serves, and site/ is what
+  // wrangler deploys. Published from here rather than hand-copied for the same
+  // reason wrangler.jsonc refuses a build step: a copy someone has to remember
+  // to make is a copy that drifts, and a stale og:image is a wrong headline on
+  // every link anyone shares. The 1x is deliberate -- scrapers cap file size.
+  const og = join(ROOT, "site", "og.png");
+  await copyFile(join(OUT, "skrim-og.png"), og);
+  console.log(`ok   site/og.png  (published from skrim-og.png)`);
 
   console.log(`\n-> ${OUT}`);
   console.log(`   html kept for inspection: ${work}`);

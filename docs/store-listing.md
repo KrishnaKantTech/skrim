@@ -114,6 +114,124 @@ Google Meet, Zoom, Loom, OBS and QuickTime are trademarks of their respective ow
 that is the aisle someone with this problem browses. Workflow & Planning is the
 runner-up and describes the moment of use rather than the reason for it.
 
+---
+
+## The ASO pass — staged, do not apply yet
+
+Written 2026-08-07, while the item is **in review**. Nothing in this section is
+live and nothing here should be pasted into the dashboard today.
+
+**Why not today.** Editing a pending item resubmits it. The queue position is
+lost and the review clock starts again, which trades a real approval date for a
+keyword. Wait for approval, confirm the public URL loads signed-out, then apply
+this — the dashboard-only half immediately, the package half with 0.2.1.
+
+In-store search is the compounding channel for an extension: it outranks every
+social post over time, and it is the one place a stranger arrives already
+looking for what this does. The fields are weighted roughly title → summary →
+description, and rank is then moved by install count, rating count and average.
+
+### The terms to rank for
+
+From MARKETING-PLAN.md § 2, in the words the ICPs actually type:
+
+| Query | Where it appears today |
+| --- | --- |
+| hide bookmarks bar screen share | description only |
+| hide bookmarks bar zoom / google meet | description only |
+| hide bookmarks bar google meet | description only |
+| bookmarks showing on screen share | nowhere |
+| hide bookmarks when recording | nowhere (`recorder` appears once, of Loom) |
+| screen share privacy | description, once |
+
+A keyword frequency pass over the live description: `bookmarks bar` ×3,
+`screen share` ×3, `hide` ×3, `privacy` ×1, `record` ×1, `screen sharing` ×0.
+The body is in reasonable shape. **The gap is at the top**, in the two fields
+that carry the most weight.
+
+### Recommended title — needs a package upload
+
+The single biggest miss on the whole listing: the title is **5 characters of a
+75 cap**, and "Skrim" is a coined word that matches no query anyone types. The
+title is the heaviest-weighted field in store search and it is currently doing
+none of that work.
+
+    Skrim — Hide Bookmarks Bar on Screen Share
+
+42 characters. Brand first so the word still does its branding job, then one
+plain descriptive phrase — the form Chrome expects. It is not stuffing: it is
+one phrase, it is exactly what the extension does, and it reads as a name.
+
+Two deliberate omissions:
+
+- **No "Google Meet" or "Zoom" in the title.** Another company's trademark in
+  the name field is a rejection risk and reads as an affiliation claim. They
+  belong in the summary and description, which is where they already are, and
+  where naming them in text is fine (see CLAIMS.md § Trademarks).
+- **No "free", no "best", no comma-separated keyword tail.** Chrome demotes for
+  keyword stuffing and the listing's whole argument is that it does not oversell.
+
+This ships through `manifest.json` `name`, not the dashboard — the store reads
+the title from the package. So it is a 0.2.1 change, and it will re-trigger
+review by itself. Do it as part of the first real post-approval update rather
+than as its own submission.
+
+### Recommended summary — needs the same package upload
+
+Currently 67 of 132 characters, and it spends none of the remaining 65 on the
+trigger words people search with.
+
+    Automatically hides your bookmarks bar when a screen share or recording starts, and puts every bookmark back when it ends.
+
+122 characters. It adds `recording` — a real, checkable capability (Loom's
+Chrome extension recorder) that today appears nowhere above the fold — and it
+puts the restore promise in the field that shows in search results, because
+"will it give them back?" is the objection that stops the install.
+
+Byte-identical to `manifest.json` `description`, same rule as the current one:
+edit one, edit the other, or the next upload silently reverts the listing.
+
+### Description — dashboard-only, apply as soon as it is approved
+
+Two changes, both small, neither touching a claim:
+
+1. **Name the surfaces in the opening line.** The first two lines are what
+   search indexes hardest and what the truncated preview shows. Replace the
+   current opener with:
+
+       Skrim hides your bookmarks bar the moment you start sharing your screen — in Google Meet, in Zoom on the web, or in any site or recorder that uses Chrome's screen-share API — and puts it back the moment you stop.
+
+2. **Add a short question block before REQUIREMENTS.** Real queries, answered
+   honestly. This is legitimate long-tail indexing because every line is a
+   question people genuinely arrive with:
+
+       COMMON QUESTIONS
+
+       How do I hide my bookmarks bar when screen sharing? Chrome has no setting for it, and Ctrl+Shift+B only works if you remember it before the picker opens. Skrim does it automatically, every time.
+
+       Does it work with Google Meet and Zoom? Yes, on the web. Desktop apps capture outside Chrome, where no extension can see them.
+
+       Will I get my bookmarks back? Every one, at the exact position it came from — including after a crash, and including if you uninstall Skrim while the bar is hidden.
+
+       Does it hide my tabs or notifications too? No. It covers one thing: the bookmarks bar.
+
+Both stay inside CLAIMS.md. The second answer says "on the web" out loud, which
+is the one line CLAIMS.md forbids leaving out.
+
+### Left open, on purpose
+
+- **Microsoft Teams on the web** is a high-volume query this listing does not
+  say a word about. Teams uses `getDisplayMedia`, so it should be covered by the
+  general claim already made — but *should be* is not *tested*, and CLAIMS.md
+  only lets Meet and Zoom be named as verified. **Test one Teams-on-the-web
+  share end to end.** If it works, it is the cheapest keyword left on the table
+  and it goes in the description's WHAT IT COVERS list. If it does not, that is
+  a bug worth knowing about before anyone reports it.
+- **Screenshot filenames and alt text are not indexed** by store search, so
+  there is no ASO work in `brand/store/`. Leave them alone; they are correct.
+
+---
+
 ### Language
 
 English (United States).

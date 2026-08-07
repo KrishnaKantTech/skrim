@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How to hide your bookmarks bar in Zoom (desktop app and web) — Skrim</title>
+    <meta name="description" content="Whether your bookmarks bar can be hidden automatically in Zoom depends on which Zoom you use — the desktop app or a browser tab. The honest answer for both." />
+    <link rel="canonical" href="https://skrim.app/hide-bookmarks-bar-zoom" />
+    <meta property="og:title" content="How to hide your bookmarks bar in Zoom" />
+    <meta property="og:description" content="Whether your bookmarks bar can be hidden automatically in Zoom depends on which Zoom you use — the desktop app or a browser tab. The honest answer for both." />
+    <meta property="og:url" content="https://skrim.app/hide-bookmarks-bar-zoom" />
+    <meta property="og:type" content="article" />
+    <meta property="og:image" content="https://skrim.app/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://skrim.app/og.png" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3CclipPath id='c'%3E%3Crect x='2' y='2' width='28' height='28' rx='6'/%3E%3C/clipPath%3E%3C/defs%3E%3Crect x='2' y='2' width='28' height='28' rx='6' fill='%230A100E'/%3E%3Crect x='7.5' y='14.5' width='15' height='3' rx='1.5' fill='%2317DE82' opacity='.5'/%3E%3Crect x='7.5' y='20.5' width='10' height='3' rx='1.5' fill='%2317DE82' opacity='.5'/%3E%3Cg clip-path='url(%23c)'%3E%3Crect x='2' y='2' width='28' height='11.5' fill='%2317DE82'/%3E%3C/g%3E%3C/svg%3E" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --green-400: #17de82; --green-500: #00c36d; --green-700: #00854b;
+        --bg: #fff; --surface: #f4f6f5; --surface-2: #eaedeb;
+        --line: rgba(10,16,14,.09); --line-strong: rgba(10,16,14,.16);
+        --text: #0a100e; --muted: #4d5854;
+        --accent: var(--green-400); --accent-hover: var(--green-500);
+        --accent-text: var(--green-700); --on-accent: #0a100e;
+        --radius-sm: 7px; --radius-md: 9px; --radius-lg: 14px;
+        --ease: cubic-bezier(.2,0,0,1);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0a100e; --surface: #161d1a; --surface-2: #28312d;
+          --line: rgba(255,255,255,.09); --line-strong: rgba(255,255,255,.18);
+          --text: #eaedeb; --muted: #a3aea8; --accent-text: var(--green-400);
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; background: var(--bg); color: var(--text);
+        font: 16px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap { max-width: 44rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+
+      header { display: flex; align-items: center; gap: .6rem; margin-bottom: 3rem; }
+      header svg { display: block; width: 28px; height: 28px; }
+      header a { color: inherit; text-decoration: none; font-weight: 700; letter-spacing: -.01em; }
+
+      h1 { font-size: clamp(1.75rem, 5vw, 2.5rem); line-height: 1.12;
+           letter-spacing: -.03em; margin: 0 0 1.25rem; text-wrap: balance; }
+      h2 { font-size: 1.3rem; letter-spacing: -.02em; margin: 3rem 0 .75rem; }
+      h3 { font-size: 1.05rem; margin: 2rem 0 .5rem; }
+      p, li { color: var(--muted); }
+      b, strong { color: var(--text); font-weight: 600; }
+      /* The direct answer, first thing under the H1. Sits in the page's own
+         voice rather than a callout box -- a box reads as an ad. */
+      .answer p { color: var(--text); font-size: 1.1rem; }
+      .answer p:first-child { font-weight: 500; }
+      ul, ol { padding-left: 1.35rem; }
+      li { margin-bottom: .5rem; }
+      ul.split { list-style: none; padding: 0; }
+      ul.split li {
+        border-left: 3px solid var(--line-strong); padding-left: .9rem;
+        margin-bottom: .9rem;
+      }
+      code { font-family: ui-monospace, Menlo, monospace; font-size: .9em;
+             background: var(--surface-2); padding: .1em .35em; border-radius: 4px; }
+      kbd {
+        font-family: ui-monospace, Menlo, monospace; font-size: .82em;
+        background: var(--surface); border: 1px solid var(--line-strong);
+        border-bottom-width: 2px; border-radius: 5px; padding: .12em .4em;
+        color: var(--text); white-space: nowrap;
+      }
+      /* Wide content scrolls inside itself; the page never scrolls sideways. */
+      .scroller { overflow-x: auto; margin: 1rem 0 0; }
+      table { border-collapse: collapse; width: 100%; min-width: 30rem; font-size: .95rem; }
+      th, td { text-align: left; padding: .6rem .8rem; border-bottom: 1px solid var(--line); }
+      th { color: var(--text); font-weight: 600; }
+      td { color: var(--muted); }
+      .note {
+        margin: 2rem 0 0; padding: 1rem 1.1rem; background: var(--surface);
+        border: 1px solid var(--line); border-radius: var(--radius-lg);
+        font-size: .95rem; color: var(--muted);
+      }
+      p.check { font-size: .95rem; border-left: 3px solid var(--line-strong); padding-left: .9rem; }
+
+      .cta {
+        margin: 3.5rem 0 0; padding: 1.75rem 1.5rem; background: var(--surface);
+        border: 1px solid var(--line-strong); border-radius: var(--radius-lg);
+      }
+      .cta h2 { margin: 0 0 .4rem; font-size: 1.25rem; }
+      .cta p { margin: 0 0 1.25rem; font-size: .95rem; }
+      form { display: flex; gap: .5rem; flex-wrap: wrap; }
+      input[type="email"] {
+        flex: 1 1 16rem; min-width: 0; font: inherit; font-size: .95rem;
+        color: var(--text); background: var(--bg);
+        border: 1px solid var(--line-strong); border-radius: var(--radius-md);
+        padding: .6rem .75rem;
+      }
+      input[type="email"]:focus-visible {
+        outline: none; border-color: transparent;
+        box-shadow: 0 0 0 1px var(--bg), 0 0 0 3px var(--accent-hover);
+      }
+      button, .button {
+        flex: none; font: inherit; font-size: .95rem; font-weight: 600;
+        color: var(--on-accent); background: var(--accent);
+        border: 1px solid transparent; border-radius: var(--radius-md);
+        padding: .6rem 1.1rem; cursor: pointer; text-decoration: none;
+        display: inline-block;
+      }
+      button:hover, .button:hover { background: var(--accent-hover); }
+      button:focus-visible, .button:focus-visible {
+        outline: none; box-shadow: 0 0 0 1px var(--bg), 0 0 0 3px var(--accent-hover);
+      }
+      button[disabled] { opacity: .6; cursor: default; }
+      .sr, .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+      .cta .note { margin: .9rem 0 0; padding: 0; background: none; border: 0; font-size: .85rem; }
+      .cta .note[data-tone="ok"] { color: var(--accent-text); font-weight: 600; }
+      .cta .note[data-tone="bad"] { color: var(--text); }
+      .fineprint { margin: .9rem 0 0 !important; font-size: .8rem; color: var(--muted); }
+
+      /* Wall of love. Deliberately plain -- no avatars, no five-star rows, no
+         card shadows. A testimonial that looks like an ad gets read as one. */
+      .wall { display: grid; gap: 1.25rem; margin-top: 1.5rem; }
+      .wall figure {
+        margin: 0; padding: 1.1rem 1.25rem; background: var(--surface);
+        border: 1px solid var(--line); border-radius: var(--radius-lg);
+      }
+      .wall blockquote { margin: 0 0 .6rem; color: var(--text); font-size: 1.05rem; }
+      .wall figcaption { font-size: .875rem; color: var(--muted); }
+      .wall figcaption span { opacity: .75; }
+
+      .related { margin-top: 3.5rem; }
+      .related h2 { font-size: 1rem; margin-bottom: .6rem; }
+      .related ul { list-style: none; padding: 0; margin: 0; }
+      .related li { margin-bottom: .4rem; }
+
+      footer {
+        margin-top: 3.5rem; padding-top: 1.5rem; border-top: 1px solid var(--line);
+        display: flex; gap: 1.25rem; flex-wrap: wrap;
+        font-size: .875rem; color: var(--muted);
+      }
+      a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+      footer a { color: var(--muted); }
+      footer a:hover { color: var(--text); }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <svg viewBox="0 0 32 32" aria-hidden="true">
+          <defs><clipPath id="c"><rect x="2" y="2" width="28" height="28" rx="6" /></clipPath></defs>
+          <rect x="2" y="2" width="28" height="28" rx="6" fill="#0A100E" />
+          <rect x="7.5" y="14.5" width="15" height="3" rx="1.5" fill="#17DE82" opacity=".5" />
+          <rect x="7.5" y="20.5" width="10" height="3" rx="1.5" fill="#17DE82" opacity=".5" />
+          <g clip-path="url(#c)"><rect x="2" y="2" width="28" height="11.5" fill="#17DE82" /></g>
+        </svg>
+        <a href="/">Skrim</a>
+      </header>
+
+      <main>
+        <h1>How to hide your bookmarks bar in Zoom</h1>
+        <div class="answer"><p>
+        It depends on which Zoom you use, and the difference matters more than
+        anything else on this page.
+      </p>
+      <ul class="split">
+        <li>
+          <b>Zoom desktop app</b> — no browser extension can help you, including
+          this one. The app captures your screen outside Chrome, where nothing
+          running inside Chrome can see it. Your options are manual, and they are
+          below.
+        </li>
+        <li>
+          <b>Zoom in a browser tab</b> — fully solvable, automatically.
+        </li>
+      </ul>
+        </div>
+
+      <h2>If you use the Zoom desktop app</h2>
+      <p>
+        This is most people, and it is worth being blunt about: an extension runs
+        inside Chrome and can only know about things Chrome knows about. When the
+        Zoom desktop client captures your screen, it asks the operating system,
+        not the browser. Chrome is never told. Any extension claiming to cover
+        that case is claiming something it cannot do.
+      </p>
+      <p>What actually works there:</p>
+      <ol>
+        <li>
+          <b>Share a specific window rather than your whole screen.</b> Zoom's
+          picker lets you choose one application window. If you pick a window
+          that is not Chrome, your bookmarks bar was never in frame to begin with.
+        </li>
+        <li>
+          <b>If you are sharing Chrome itself</b>, press
+          <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>
+          (<kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> on a Mac) before you click
+          Share, and put it back after.
+        </li>
+        <li>
+          <b>Keep a second Chrome profile for presenting</b>, with a deliberately
+          empty bar. More setup, but it is the only one of these that cannot be
+          undone by forgetting.
+        </li>
+      </ol>
+
+      <h2>If you use Zoom in a browser tab</h2>
+      <p>
+        Zoom on the web goes through Chrome's own screen-share API, exactly like
+        Google Meet. Chrome knows the share started, so an extension can act on
+        it — and Zoom on the web is one of the two surfaces Skrim is tested
+        against end to end in a real browser.
+      </p>
+      <p>
+        Note that "Zoom on the web" means the meeting genuinely running in a
+        browser tab. If clicking a Zoom link hands off to the installed
+        application, you are in the first section, not this one.
+      </p>
+      
+<h2>Where Skrim comes in</h2>
+<p>
+  Skrim is a free Chrome extension that does one thing: it watches for a screen
+  share starting and takes your bookmarks bar down before the first frame goes
+  out, then puts every bookmark back at the exact position it came from when
+  the share ends. There is nothing to remember and nothing to press.
+</p>
+<p>
+  It makes no network requests of any kind — no server, no account, no
+  analytics — and that is a claim you can check rather than one you have to
+  take: the extension is source-available, and one <code>grep</code> for
+  <code>fetch</code> across the code comes back empty.
+</p>
+      
+<h2>What it does not cover</h2>
+<ul>
+  <li>
+    <b>Desktop apps.</b> The Zoom desktop client, the Loom desktop app, OBS and
+    QuickTime capture outside Chrome entirely, where no extension can see them.
+  </li>
+  <li>
+    <b>Chrome's own share picker preview.</b> On a site that asks for your
+    screen the instant it loads, the thumbnail Chrome draws inside the picker
+    can still show the bar for a moment. Google Meet and Zoom on the web both
+    preview clean, but it is a limit of the picker, not something an extension
+    can reach.
+  </li>
+  <li>
+    <b>Anything other than the bookmarks bar.</b> Not your tabs, not your
+    notifications, not your desktop. One bar is the whole job.
+  </li>
+</ul>
+      
+<aside class="note">
+  <b>If you use Chrome Sync:</b> bookmarks are synced data, so while the bar is
+  hidden here it is also empty on your other signed-in devices until the share
+  ends. That is Chrome's sync doing what you turned it on to do — Skrim sends
+  nothing anywhere. Sharing a single tab releases within seconds, and there is a
+  setting that tucks the bar into one folder instead of clearing it, if you
+  would rather your other computers kept theirs.
+</aside>
+
+      <section class="cta" id="get">
+        <h2>Have it happen on its own</h2>
+        <p>
+          Skrim is in review for the Chrome Web Store. One email when it ships,
+          and nothing else.
+        </p>
+        <form id="form" method="POST" action="/api/waitlist">
+          <label class="hp" aria-hidden="true">
+            Company
+            <input type="text" name="company" tabindex="-1" autocomplete="off" />
+          </label>
+          <input type="hidden" name="source" value="hide-bookmarks-bar-zoom" />
+          <input type="hidden" name="page" value="/hide-bookmarks-bar-zoom" />
+          <label class="sr" for="email">Email address</label>
+          <input id="email" type="email" name="email" required autocomplete="email"
+                 placeholder="you@example.com" />
+          <button type="submit" id="submit">Notify me</button>
+        </form>
+        <p class="note" id="note" hidden></p>
+        <p class="fineprint">
+          We store your address and the date, and use it once — to tell you Skrim
+          is out. See the <a href="/privacy#website">privacy policy</a>.
+        </p>
+      </section>
+
+        <nav class="related">
+          <h2>Related</h2>
+          <ul>
+          <li><a href="/hide-bookmarks-bar">The full guide: four ways to hide it in Chrome</a></li>
+          <li><a href="/hide-bookmarks-bar-google-meet">Hiding it in Google Meet</a></li>
+          <li><a href="/hide-bookmarks-bar-screen-recording">Hiding it while recording your screen</a></li>
+          </ul>
+        </nav>
+      </main>
+
+      <footer>
+        <a href="/">Skrim</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/restore">Lost your bookmarks?</a>
+        <span>© 2026 Skrim</span>
+      </footer>
+    </div>
+    <script>
+      (function () {
+        var form = document.getElementById("form");
+        if (!form) return;
+        var note = document.getElementById("note");
+        var submit = document.getElementById("submit");
+        var THANKS = "Thanks — we will email you when Skrim is live.";
+
+        function say(text, tone) {
+          note.textContent = text;
+          note.setAttribute("data-tone", tone);
+          note.hidden = false;
+        }
+
+        form.addEventListener("submit", function (event) {
+          event.preventDefault();
+          if (!form.email.checkValidity()) {
+            say("That does not look like an email address.", "bad");
+            form.email.focus();
+            return;
+          }
+          submit.disabled = true;
+          submit.textContent = "Sending…";
+          fetch("/api/waitlist", {
+            method: "POST",
+            headers: { "content-type": "application/json", accept: "application/json" },
+            body: JSON.stringify(Object.fromEntries(new FormData(form))),
+          })
+            .then(function (r) { return r.json().catch(function () { return { ok: r.ok }; }); })
+            .then(function (body) {
+              if (body && body.ok) { form.hidden = true; say(THANKS, "ok"); }
+              else {
+                say("That does not look like an email address.", "bad");
+                submit.disabled = false; submit.textContent = "Notify me";
+              }
+            })
+            .catch(function () {
+              say("Could not reach the server. Try again in a moment.", "bad");
+              submit.disabled = false; submit.textContent = "Notify me";
+            });
+        });
+
+        var params = new URLSearchParams(location.search);
+        if (params.has("joined")) { form.hidden = true; say(THANKS, "ok"); }
+        else if (params.has("invalid")) { say("That does not look like an email address.", "bad"); }
+      })();
+    </script>
+  </body>
+</html>

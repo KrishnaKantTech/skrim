@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+# A receipt bookmark points here with the payload in the fragment. It is a
+# recovery destination, not a search result, and it should never be indexed.
+Disallow: /restore
+
+Sitemap: https://skrim.app/sitemap.xml

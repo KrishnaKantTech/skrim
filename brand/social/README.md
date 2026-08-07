@@ -69,7 +69,7 @@ of it. Its scrim is at 47%, not 41%: 41% of 500px is not enough room for a
 lockup and a headline, and the alternative — shrinking the headline — costs
 more than the ratio is worth on a cut nobody sees next to the others.
 
-**Square.** The headline breaks to two lines here, which is where it reads
+**Square.** The headline breaks to three lines here, which is where it reads
 best, and the field holds seven chip rows.
 
 The three are composed by hand rather than scaled from one master. A 1200×630
@@ -78,8 +78,13 @@ avatar. What they share is the geometry and the tokens, not the arrangement.
 
 ## Changing the copy
 
-Headline, sub-copy and the bookmark pool are all at the top of
-`tools/make-social.mjs`. The pool is one flat list, sliced into rows of a
+Headline, sub-copy, the two footer tags and the bookmark pool are all at the top
+of `tools/make-social.mjs`. The headline says *automatic* on purpose — that is
+the only reason to install this over doing nothing — which is also why the
+footer carries neutral fact tags and not the keycaps an earlier cut had. A
+keystroke on the artwork would advertise the exact thing the product replaces.
+
+The pool is one flat list, sliced into rows of a
 different length per format — a row has to run off the right edge of whichever
 card it lands on, because a bookmark bar that stops short of the edge looks
 like a *diagram* of a bookmark bar. The build throws if a format asks for more

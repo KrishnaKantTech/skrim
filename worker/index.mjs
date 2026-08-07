@@ -88,16 +88,21 @@ async function join(request, env) {
   const fields = await readFields(request);
   if (!fields) return ok(request); // unparseable or oversized -- say nothing
 
+  // Where the no-JS round trip has to land. Read before anything can bail out,
+  // so every exit below -- honeypot, bad address, success -- returns the reader
+  // to the page they were actually reading.
+  const back = safePath(fields.page);
+
   // Honeypot. A field positioned off-screen and marked aria-hidden, which a
   // person never sees and a form-filling bot cannot resist. Answer success so
   // the bot has no signal to tune against.
-  if (fields.company) return ok(request);
+  if (fields.company) return ok(request, back);
 
   const email = String(fields.email ?? "").trim().toLowerCase();
   if (!email || email.length > EMAIL_MAX || !EMAIL_RE.test(email)) {
     return request.headers.get("accept")?.includes("application/json")
       ? json({ ok: false, error: "invalid_email" }, 400)
-      : redirectHome(request, "invalid");
+      : redirectBack(request, "invalid", back);
   }
 
   const source = String(fields.source ?? "apex").slice(0, 32);
@@ -117,7 +122,25 @@ async function join(request, env) {
     console.error("waitlist insert failed", err);
   }
 
-  return ok(request);
+  return ok(request, back);
+}
+
+/**
+ * The intent pages under site/ each carry their own copy of the form, so the
+ * no-JS round trip has to land back where it started rather than on the
+ * homepage -- a reader who was mid-way through the Zoom page and gets dropped
+ * on the front page has been answered by being sent somewhere else.
+ *
+ * Strict allowlist rather than a URL parse, because this value is attacker-
+ * supplied and it ends up in a Location header. Lowercase letters, digits and
+ * hyphens after a single leading slash: that matches every slug the site has
+ * and cannot express "//evil.example" or a scheme.
+ */
+const PATH_RE = /^\/[a-z0-9-]{0,64}$/;
+
+function safePath(value) {
+  const path = String(value ?? "");
+  return PATH_RE.test(path) ? path : "/";
 }
 
 /**
@@ -147,16 +170,16 @@ async function readFields(request) {
   }
 }
 
-function ok(request) {
+function ok(request, back = "/") {
   return request.headers.get("accept")?.includes("application/json")
     ? json({ ok: true })
-    : redirectHome(request, "joined");
+    : redirectBack(request, "joined", back);
 }
 
 /** The no-JS path lands back on the page with a state the markup can render. */
-function redirectHome(request, state) {
+function redirectBack(request, state, path = "/") {
   const url = new URL(request.url);
-  url.pathname = "/";
+  url.pathname = path;
   url.search = `?${state}=1`;
   return Response.redirect(url.toString(), 303);
 }
