@@ -411,6 +411,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         case "adoptVault":
           sendResponse(await engine.adoptVault(msg.id));
           break;
+        case "getSettings":
+          sendResponse(await engine.getSettings());
+          break;
+        case "setSettings":
+          sendResponse(await engine.setSettings(msg.patch));
+          break;
+        case "tuck":
+          sendResponse(await engine.tuck(msg.options));
+          break;
+        case "untuck":
+          sendResponse(await engine.untuck());
+          break;
+        case "tuckStatus":
+          sendResponse(await engine.tuckStatus());
+          break;
+        case "exportBar":
+          sendResponse(await engine.exportBar(msg.format));
+          break;
+        case "importBookmarks":
+          sendResponse(await engine.importTree(msg.nodes, { folderTitle: msg.folderTitle }));
+          break;
         default:
           sendResponse({ ok: false, error: `unknown message: ${msg?.type}` });
       }

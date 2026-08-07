@@ -314,7 +314,10 @@ async function run(type, extra) {
 
 $("primary").onclick = (e) => {
   const action = e.currentTarget.dataset.action;
-  if (action === "hide") run("hide", { options: { decoys: true } });
+  // No decoy option: the engine falls back to the user's setting, so the one
+  // Hide button honours it just like an automatic hide does. The developer
+  // panel below is where an explicit on/off override still lives.
+  if (action === "hide") run("hide");
   else if (action === "restore") run("restore");
 };
 
@@ -346,6 +349,111 @@ if (DEV) {
     setTimeout(() => (btn.textContent = "Copy"), 1200);
   };
 }
+
+// ---------------------------------------------------------- settings & backup
+//
+// Shown to every copy, not just an unpacked one -- these are product controls,
+// not debug ones. The panel talks to the worker with the same `send` the rest
+// of the popup uses, so nothing here reaches chrome.bookmarks or storage
+// directly, and its state is loaded lazily the first time it opens rather than
+// on every poll. Every handler is a property assignment, never addEventListener,
+// so the popup still imports cleanly under the headless render the suite uses.
+
+/** Briefly swap a button's label to acknowledge an action, then restore it. */
+function flash(btn, text, ms = 1300) {
+  const original = btn.dataset.label ?? btn.textContent;
+  btn.dataset.label = original;
+  btn.textContent = text;
+  clearTimeout(btn._flash);
+  btn._flash = setTimeout(() => {
+    btn.textContent = btn.dataset.label ?? original;
+    delete btn.dataset.label;
+  }, ms);
+}
+
+let settingsLoaded = false;
+
+async function loadSettingsPanel() {
+  try {
+    const [cfg, tuck, s] = await Promise.all([
+      send("getSettings"),
+      send("tuckStatus"),
+      send("status"),
+    ]);
+    renderSettings(cfg, tuck, s);
+    settingsLoaded = true;
+  } catch {
+    /* leave the controls at their markup defaults */
+  }
+}
+
+function renderSettings(cfg, tuck, s) {
+  const hidden = !!s?.hidden;
+
+  if (cfg && typeof cfg.decoys === "boolean") $("decoyToggle").checked = cfg.decoys;
+  $("decoyToggle").disabled = false; // the one control that is safe while hidden
+
+  const tucked = !!tuck?.tucked;
+  const name = tuck?.name ?? cfg?.tuckName ?? "";
+  // Do not stomp on a name the user is mid-way through typing.
+  if (document.activeElement !== $("tuckName")) $("tuckName").value = name;
+  $("tuckName").disabled = tucked || hidden;
+  $("tuckName").hidden = tucked;
+  $("tuckBtn").textContent = tucked ? "Move back to the bar" : "Tuck away";
+  $("tuckBtn").dataset.mode = tucked ? "untuck" : "tuck";
+  $("tuckBtn").disabled = hidden;
+  $("tuckHint").textContent = tucked
+    ? `Your bar is tucked into “${name}”. Everything goes back to where it was when you move it out.`
+    : "Move everything on your bar into one folder — there when you want it, out of sight when you don't.";
+
+  $("copyBtn").disabled = hidden;
+  $("settingsLocked").hidden = !hidden;
+}
+
+// Lazy: the first open loads the real state; later opens are left as the user
+// last saw them, and any action re-renders from the worker's reply anyway.
+$("settings").ontoggle = (e) => {
+  if (e.currentTarget.open && !settingsLoaded) loadSettingsPanel();
+};
+
+$("decoyToggle").onchange = async (e) => {
+  const decoys = !!e.currentTarget.checked;
+  await send("setSettings", { patch: { decoys } }).catch(() => {});
+};
+
+$("tuckBtn").onclick = async (e) => {
+  const btn = e.currentTarget;
+  const untucking = btn.dataset.mode === "untuck";
+  btn.disabled = true;
+  btn.textContent = untucking ? "Moving back…" : "Tucking…";
+  try {
+    if (untucking) await send("untuck");
+    else await send("tuck", { options: { name: $("tuckName").value } });
+  } catch {
+    /* the reload below re-reads the true state either way */
+  }
+  await loadSettingsPanel();
+  refresh();
+};
+
+$("copyBtn").onclick = async (e) => {
+  const btn = e.currentTarget;
+  const res = await send("exportBar", { format: "text" }).catch(() => null);
+  if (res?.ok && res.data) {
+    const wrote = await navigator.clipboard
+      .writeText(res.data)
+      .then(() => true)
+      .catch(() => false);
+    flash(btn, wrote ? "Copied ✓" : "Press ⌘/Ctrl+C");
+  } else {
+    flash(btn, res?.hidden ? "Restore first" : "Nothing to copy");
+  }
+};
+
+// Download and import need a file dialog, which would close this popup out from
+// under them -- so they live on a full page the popup opens.
+$("backupBtn").onclick = () =>
+  chrome.tabs.create({ url: chrome.runtime.getURL("backup.html") });
 
 // A share can start while the popup is open, so the popup follows it. Gated on
 // visibility: as a real popup it is always visible and always polling, but the

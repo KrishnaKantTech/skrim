@@ -644,6 +644,193 @@ body {
   font-weight: 400;
 }
 
+/* -------------------------------------------------------- settings & backup */
+
+/* A product panel, not a debug one -- shown on every copy. It lives inside the
+ * scrolling body, collapsed, so the state readout above keeps its priority and
+ * the popup opens at the same height it always did. */
+.settings {
+  border-top: 1px solid var(--line);
+}
+
+.settings > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 2px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--muted);
+  user-select: none;
+}
+
+.settings > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings > summary:hover,
+.settings[open] > summary {
+  color: var(--text);
+}
+
+.settings > summary:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  border-radius: var(--radius-sm);
+}
+
+.settings[open] .chev {
+  transform: rotate(90deg);
+}
+
+.settings__body {
+  padding: 2px 2px 6px;
+  display: flex;
+  flex-direction: column;
+}
+
+.setting {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 0;
+}
+
+.setting + .setting {
+  border-top: 1px solid var(--line);
+}
+
+/* The stacked variant, for controls that need a full-width row beneath their
+ * label -- the tuck name and button, the backup actions. */
+.setting--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.setting__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.setting__name {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.setting__hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+
+.setting__row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.setting__row .btn {
+  flex: none;
+}
+
+/* An ordinary text input, themed. Used for the tuck folder name. */
+.field {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 9px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+
+.field::placeholder {
+  color: var(--faint);
+}
+
+.field:focus-visible {
+  outline: none;
+  border-color: var(--muted);
+  box-shadow: var(--ring);
+}
+
+.field:disabled {
+  opacity: 0.55;
+}
+
+/* Toggle. Deliberately NOT green: the brand reserves green for the covered
+ * state, so a preference switch takes a neutral ink fill when on -- a full
+ * green here would dilute the one signal the whole palette exists to protect.
+ * The thumb is the page colour, so the on/off contrast holds in both themes. */
+.switch {
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 20px;
+  margin-top: 1px;
+}
+
+.switch input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.switch__track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--line-strong);
+  transition: background var(--motion-micro) var(--motion-ease);
+}
+
+.switch__track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: 0 1px 2px rgba(10, 16, 14, 0.28);
+  transition: transform var(--motion-micro) var(--motion-ease);
+}
+
+.switch input:checked + .switch__track {
+  background: var(--text);
+}
+
+.switch input:checked + .switch__track::after {
+  transform: translateX(14px);
+}
+
+.switch input:focus-visible + .switch__track {
+  box-shadow: var(--ring);
+}
+
+.settings__locked {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--attention);
+}
+
 /* ------------------------------------------------------------- developer */
 
 .dev {

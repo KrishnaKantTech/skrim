@@ -38,6 +38,12 @@ function check(name, cond, detail = "") {
 // while disagreeing with what is actually in a user's bookmarks.
 const receiptMod = await import(`file://${path.join(BUILD, "receipt.js")}`);
 
+// portable.js is pure -- no chrome, no DOM -- so the serialise/parse round trip
+// is exercised against the real module the page ships, the same way the receipt
+// codec is, rather than against a restatement of the format that would agree
+// with itself while disagreeing with what lands in a user's file.
+const portableMod = await import(`file://${path.join(BUILD, "portable.js")}`);
+
 async function loadEngine(mock) {
   globalThis.chrome = mock.api;
   // Cache-bust so each test gets a fresh module instance (the engine holds a
@@ -2626,6 +2632,270 @@ async function testFaultInjection(maxCalls = 90) {
 }
 
 // --------------------------------------------------------------------------
+// SETTINGS, TUCK, BACKUP -- the three additions. Same discipline as the rest:
+// a tuck/untuck round trip must be byte-identical, an import must be additive
+// and touch nothing already there, and every one of these must refuse to run
+// while the bar is hidden, because the bar then holds decoys and the real items
+// are in the vault.
+
+async function testDecoySettingControlsHide() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const before = JSON.stringify(mock.snapshot("1"));
+  const barLen = () => mock.nodes.get("1").children.length;
+
+  // Default settings: an option-less hide still drops decoys, exactly as the
+  // automatic hide always has -- which is what keeps the live test unchanged.
+  await engine.hide();
+  check("decoy setting: default hide still leaves decoys", barLen() === 6, `${barLen()} on the bar`);
+  await engine.restore();
+  check("decoy setting: default restore is byte-identical", JSON.stringify(mock.snapshot("1")) === before);
+
+  // Turned off: the same option-less hide now leaves the bar truly empty.
+  await engine.setSettings({ decoys: false });
+  await engine.hide();
+  check("decoy setting: off leaves an empty bar", barLen() === 0, `${barLen()} on the bar`);
+  await engine.restore();
+  check("decoy setting: off still restores exactly", JSON.stringify(mock.snapshot("1")) === before);
+
+  // An explicit option still wins over the setting -- the developer override.
+  await engine.hide({ decoys: true });
+  check("decoy setting: an explicit option overrides the setting", barLen() === 6, `${barLen()} on the bar`);
+  await engine.restore();
+  check("decoy setting: override restore is exact", JSON.stringify(mock.snapshot("1")) === before);
+}
+
+async function testTuckRoundTrip() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const before = JSON.stringify(mock.snapshot("1"));
+  const barBefore = mock.nodes.get("1").children.map((c) => mock.nodes.get(c).title);
+
+  const t = await engine.tuck({ name: "Bookmarks" });
+  check("tuck: reports success", t.ok === true && t.tucked === true, JSON.stringify(t));
+  const barKids = mock.nodes.get("1").children;
+  check("tuck: the bar is left holding one folder", barKids.length === 1, `${barKids.length} on the bar`);
+  const folder = mock.nodes.get(barKids[0]);
+  check("tuck: the folder is named as asked", folder.title === "Bookmarks" && folder.url === undefined, folder.title);
+  const inside = folder.children.map((c) => mock.nodes.get(c).title);
+  check("tuck: every bar item moved into it, in order",
+    JSON.stringify(inside) === JSON.stringify(barBefore), inside.join(","));
+
+  const st = await engine.tuckStatus();
+  check("tuck: status reports tucked", st.tucked === true && st.folders === 1 && st.name === "Bookmarks", JSON.stringify(st));
+
+  const u = await engine.untuck();
+  check("untuck: reports success", u.ok === true && u.untucked === true, JSON.stringify(u));
+  check("untuck: the bar is byte-identical to before it was tucked",
+    JSON.stringify(mock.snapshot("1")) === before);
+  const st2 = await engine.tuckStatus();
+  check("untuck: status reports not tucked", st2.tucked === false && st2.folders === 0, JSON.stringify(st2));
+}
+
+async function testTuckComposesWithHide() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const before = JSON.stringify(mock.snapshot("1"));
+
+  await engine.tuck({ name: "Bookmarks" });
+  await engine.hide(); // default: decoys on
+  const bar = mock.nodes.get("1").children.map((c) => mock.nodes.get(c));
+  check("tuck+hide: the tuck folder is moved off the bar",
+    !bar.some((n) => n.url === undefined && n.title === "Bookmarks"), bar.map((n) => n.title).join(","));
+  check("tuck+hide: decoys stand in for it", bar.length === 6, `${bar.length} on the bar`);
+
+  await engine.restore();
+  const bar2 = mock.nodes.get("1").children.map((c) => mock.nodes.get(c));
+  check("tuck+hide+restore: the tuck folder comes back",
+    bar2.length === 1 && bar2[0].title === "Bookmarks" && bar2[0].url === undefined,
+    bar2.map((n) => n.title).join(","));
+
+  const u = await engine.untuck();
+  check("tuck+hide+restore+untuck: everything is byte-identical",
+    u.ok === true && JSON.stringify(mock.snapshot("1")) === before);
+}
+
+async function testTuckRefusesWhileHidden() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  await engine.hide({ decoys: false });
+  const before = JSON.stringify(mock.snapshot("0"));
+
+  const t = await engine.tuck({ name: "Bookmarks" });
+  check("tuck: refuses while the bar is hidden", t.ok === false && t.hidden === true, JSON.stringify(t));
+  const u = await engine.untuck();
+  check("untuck: refuses while the bar is hidden", u.ok === false && u.hidden === true, JSON.stringify(u));
+  check("tuck: a refusal changes nothing in the tree", JSON.stringify(mock.snapshot("0")) === before);
+
+  await engine.restore();
+}
+
+async function testTuckSweepsItemsAddedLater() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  await engine.tuck({ name: "Bookmarks" });
+  await mock.api.bookmarks.create({ parentId: "1", title: "Fresh", url: "https://fresh.example/" });
+  check("tuck: a bookmark added afterwards sits outside the folder",
+    mock.nodes.get("1").children.length === 2);
+
+  const t = await engine.tuck({ name: "Bookmarks" });
+  check("tuck again: reuses the same folder rather than nesting a second",
+    t.folders === 1 && mock.nodes.get("1").children.length === 1, JSON.stringify(t));
+  const folder = mock.nodes.get(mock.nodes.get("1").children[0]);
+  check("tuck again: the new bookmark is swept in",
+    folder.children.map((c) => mock.nodes.get(c).title).includes("Fresh"));
+
+  await engine.untuck();
+}
+
+async function testExportBarSerializes() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const res = await engine.exportBar("html");
+  check("export: reports the bar's link count", res.ok === true && res.count === 6,
+    JSON.stringify({ ok: res.ok, count: res.count }));
+  check("export: produces a Netscape bookmark file",
+    res.data.includes("<!DOCTYPE NETSCAPE-Bookmark-file-1>") && res.data.includes("<DL>"));
+  check("export: a nested link survives with its URL",
+    res.data.includes(">Leaf</A>") && res.data.includes("https://d.example/2"));
+
+  const parsed = portableMod.parseNetscape(res.data);
+  check("export: round-trips through the parser to the same link count",
+    portableMod.countLinks(parsed) === 6, `${portableMod.countLinks(parsed)}`);
+
+  const text = await engine.exportBar("text");
+  check("export: the text outline shows folders and links",
+    text.ok === true && text.data.includes("Work/") && text.data.includes("Docs — https://d.example/1"),
+    text.data.slice(0, 60));
+}
+
+async function testExportRefusesWhileHidden() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  await engine.hide({ decoys: true });
+  const res = await engine.exportBar("html");
+  check("export: refuses while hidden rather than exporting decoys",
+    res.ok === false && res.hidden === true, JSON.stringify(res));
+  await engine.restore();
+}
+
+async function testImportAddsAFolderNonDestructively() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const before = JSON.stringify(mock.snapshot("1"));
+  const barLenBefore = mock.nodes.get("1").children.length;
+
+  const nodes = [
+    { title: "Imported A", url: "https://a.import/" },
+    { title: "Sub", children: [{ title: "B", url: "https://b.import/" }] },
+  ];
+  const res = await engine.importTree(nodes);
+  check("import: reports what it created", res.ok === true && res.created === 2, JSON.stringify(res));
+
+  const barKids = mock.nodes.get("1").children.map((c) => mock.nodes.get(c));
+  check("import: adds exactly one folder to the bar", barKids.length === barLenBefore + 1);
+  const folder = barKids[barKids.length - 1];
+  check("import: into a dated folder", folder.url === undefined && /^Imported bookmarks/.test(folder.title), folder.title);
+  const inside = folder.children.map((c) => mock.nodes.get(c));
+  check("import: with the links and nesting intact",
+    inside.length === 2 && inside[0].title === "Imported A" && inside[0].url === "https://a.import/" &&
+      inside[1].url === undefined && mock.nodes.get(inside[1].children[0]).url === "https://b.import/",
+    inside.map((n) => n.title).join(","));
+
+  const originals = JSON.parse(before).c;
+  const nowTop = mock.nodes.get("1").children.slice(0, barLenBefore).map((c) => mock.snapshot(c));
+  check("import: leaves every existing bookmark exactly as it was",
+    JSON.stringify(nowTop) === JSON.stringify(originals));
+}
+
+async function testImportRefusesWhileHidden() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  await engine.hide({ decoys: false });
+  const before = JSON.stringify(mock.snapshot("0"));
+  const res = await engine.importTree([{ title: "X", url: "https://x.import/" }]);
+  check("import: refuses while the bar is hidden", res.ok === false && res.hidden === true, JSON.stringify(res));
+  check("import: a refusal creates nothing", JSON.stringify(mock.snapshot("0")) === before);
+  await engine.restore();
+}
+
+// --- portable.js, exercised as the pure module the page ships ----------------
+
+function shapeOf(nodes) {
+  return (nodes ?? []).map((n) =>
+    n.url === undefined || n.url === null
+      ? { t: n.title, c: shapeOf(n.children) }
+      : { t: n.title, u: n.url });
+}
+
+async function testPortableRoundTrip() {
+  const tree = [
+    { title: "Work", children: [
+      { title: "Docs", url: "https://d.example/1" },
+      { title: "Nested", children: [{ title: "Leaf", url: "https://d.example/2" }] },
+    ] },
+    { title: "Headlines", url: "https://n.example/" },
+    { title: "Empty folder", children: [] },
+  ];
+  const html = portableMod.toNetscapeHtml(tree, { title: "Bookmarks" });
+  const back = portableMod.parseNetscape(html);
+  check("portable: a tree survives serialise -> parse unchanged",
+    JSON.stringify(shapeOf(back)) === JSON.stringify(shapeOf(tree)), JSON.stringify(shapeOf(back)));
+  check("portable: link count is preserved", portableMod.countLinks(back) === 3);
+}
+
+async function testPortableParsesAStandardExport() {
+  const html = [
+    "<!DOCTYPE NETSCAPE-Bookmark-file-1>",
+    '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">',
+    "<TITLE>Bookmarks</TITLE>",
+    "<H1>Bookmarks</H1>",
+    "<DL><p>",
+    '    <DT><H3 ADD_DATE="1600000000" LAST_MODIFIED="1600000001">Work</H3>',
+    "    <DL><p>",
+    '        <DT><A HREF="https://a.example/?x=1&amp;y=2" ADD_DATE="1600000002">A &amp; B</A>',
+    '        <DT><A HREF="https://b.example/">B</A>',
+    "    </DL><p>",
+    '    <DT><A HREF="https://c.example/">C</A>',
+    "</DL><p>",
+  ].join("\n");
+  const nodes = portableMod.parseNetscape(html);
+  check("portable: a real browser export parses to the right shape",
+    nodes.length === 2 && nodes[0].title === "Work" && nodes[0].children.length === 2 && nodes[1].title === "C",
+    JSON.stringify(shapeOf(nodes)));
+  check("portable: entities in a title are decoded", nodes[0].children[0].title === "A & B", nodes[0].children[0].title);
+  check("portable: entities in a URL are decoded too",
+    nodes[0].children[0].url === "https://a.example/?x=1&y=2", nodes[0].children[0].url);
+  check("portable: ADD_DATE becomes a millisecond timestamp",
+    nodes[0].children[0].dateAdded === 1600000002000, String(nodes[0].children[0].dateAdded));
+  check("portable: three links found", portableMod.countLinks(nodes) === 3);
+}
+
+async function testPortableEscapesAndUnescapes() {
+  const tree = [{ title: 'A & B < C > "D" 🎉', url: "https://x.example/?a=1&b=2&c=<>" }];
+  const html = portableMod.toNetscapeHtml(tree);
+  check("portable: markup characters are escaped in the file",
+    html.includes("&amp;") && html.includes("&lt;") && html.includes("&quot;D&quot;"), "");
+  const back = portableMod.parseNetscape(html);
+  check("portable: a title with markup and an emoji round-trips exactly",
+    back[0].title === 'A & B < C > "D" 🎉', JSON.stringify(back[0].title));
+  check("portable: a URL with ampersands and angle brackets round-trips exactly",
+    back[0].url === "https://x.example/?a=1&b=2&c=<>", back[0].url);
+}
+
+async function testPortableToleratesMalformedInput() {
+  check("portable: empty input yields an empty tree",
+    portableMod.parseNetscape("").length === 0 && portableMod.parseNetscape("not html at all").length === 0);
+  // A stray unbalanced </DL> must not throw or corrupt what follows it.
+  const salvaged = portableMod.parseNetscape(
+    '</DL><DT><A HREF="https://ok.example/">Ok</A></DL></DL>',
+  );
+  check("portable: a malformed file degrades to what it can salvage, never throws",
+    portableMod.countLinks(salvaged) === 1 && salvaged.some((n) => n.url === "https://ok.example/"),
+    JSON.stringify(salvaged));
+}
+
+// --------------------------------------------------------------------------
 
 const t0 = Date.now();
 await testRoundTrip("after-removal");
@@ -2710,6 +2980,19 @@ await testBrokenApiDoesNotSilenceTheWorker();
 await testPopupWarnsAboutSyncOnlyWhenTheBarSyncs();
 await testPopupExplainsAPeerHideInsteadOfOfferingRecovery();
 await testDeveloperControlsShipToNobody();
+await testDecoySettingControlsHide();
+await testTuckRoundTrip();
+await testTuckComposesWithHide();
+await testTuckRefusesWhileHidden();
+await testTuckSweepsItemsAddedLater();
+await testExportBarSerializes();
+await testExportRefusesWhileHidden();
+await testImportAddsAFolderNonDestructively();
+await testImportRefusesWhileHidden();
+await testPortableRoundTrip();
+await testPortableParsesAStandardExport();
+await testPortableEscapesAndUnescapes();
+await testPortableToleratesMalformedInput();
 const fi = await testFaultInjection();
 const fr = await testFaultInjectionRestore();
 

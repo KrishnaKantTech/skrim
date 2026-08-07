@@ -167,6 +167,82 @@
           original order on the bar may not.</span
         >
       </p>
+
+      <!-- Settings, for every copy (unlike the developer panel below). Collapsed
+           by default, and its state is loaded lazily the first time it opens, so
+           the popup's one-second state readout above is never taxed for it. -->
+      <details class="settings" id="settings">
+        <summary>
+          <svg class="chev" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m9 5 7 7-7 7" />
+          </svg>
+          <span>Settings &amp; backup</span>
+        </summary>
+        <div class="settings__body">
+          <!-- Feature 1: the neutral placeholder links, on or off. -->
+          <label class="setting" for="decoyToggle">
+            <span class="setting__text">
+              <span class="setting__name">Placeholder links</span>
+              <span class="setting__hint"
+                >Leave a few neutral bookmarks on the bar while it's hidden. A
+                bar that goes suddenly empty is its own giveaway.</span
+              >
+            </span>
+            <span class="switch">
+              <input type="checkbox" id="decoyToggle" />
+              <span class="switch__track" aria-hidden="true"></span>
+            </span>
+          </label>
+
+          <!-- Feature 2: park the whole bar inside one unremarkable folder. -->
+          <div class="setting setting--stack">
+            <span class="setting__text">
+              <span class="setting__name">Tuck the bar into a folder</span>
+              <span class="setting__hint" id="tuckHint"
+                >Move everything on your bar into one folder — there when you
+                want it, out of sight when you don't.</span
+              >
+            </span>
+            <div class="setting__row">
+              <input
+                type="text"
+                id="tuckName"
+                class="field"
+                maxlength="60"
+                placeholder="Folder name"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <button id="tuckBtn" class="btn btn--ghost" type="button" data-mode="tuck">
+                Tuck away
+              </button>
+            </div>
+          </div>
+
+          <!-- Feature 3: never lose the bar. Copy is instant here; the rest
+               (download, import) needs a file dialog, which closes a popup, so
+               it opens the backup page. -->
+          <div class="setting setting--stack">
+            <span class="setting__text">
+              <span class="setting__name">Back up your bookmarks</span>
+              <span class="setting__hint"
+                >Keep your own copy, so trying this extension never risks
+                losing them.</span
+              >
+            </span>
+            <div class="setting__row">
+              <button id="copyBtn" class="btn btn--ghost" type="button">Copy</button>
+              <button id="backupBtn" class="btn btn--ghost" type="button">
+                Download / import…
+              </button>
+            </div>
+          </div>
+
+          <p class="settings__locked" id="settingsLocked" hidden>
+            Your bar is hidden right now. Restore it to change these.
+          </p>
+        </div>
+      </details>
     </div>
 
     <!-- A developer affordance, not a product one: a no-decoy hide, a forced

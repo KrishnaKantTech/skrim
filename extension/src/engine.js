@@ -22,6 +22,8 @@
 import { getGroups, isMutable } from "./roots.js";
 import * as journal from "./journal.js";
 import * as receipt from "./receipt.js";
+import * as settings from "./settings.js";
+import * as portable from "./portable.js";
 
 export const VAULT_TITLE =
   "Skrim — hidden while screen sharing (drag these back to your bookmarks bar)";
@@ -59,6 +61,11 @@ async function findVaults() {
 const OWNED_VAULTS_KEY = "secureshare.ownedVaults";
 const LAST_FAILURE_KEY = "secureshare.lastFailure";
 const STRAY_DECOYS_KEY = "secureshare.strayDecoys";
+// The folders the tuck feature parks bar items in, one id per bar group. State,
+// not a preference: it names live bookmark folders, so it lives here with the
+// engine's other bookkeeping rather than in settings, where a reset could
+// strand them.
+const TUCK_KEY = "secureshare.tuck";
 
 // Give up rather than retry a hopeless restore forever.
 const MAX_RESTORE_ATTEMPTS = 3;
@@ -527,7 +534,7 @@ async function stillHidden(j) {
 
 // ---------------------------------------------------------------------------
 
-async function hideImpl({ decoys = true } = {}) {
+async function hideImpl({ decoys } = {}) {
   const existing = await journal.read();
   if (journal.isDisplaced(existing)) {
     if (await stillHidden(existing)) {
@@ -628,7 +635,14 @@ async function hideImpl({ decoys = true } = {}) {
   // would be wrong the moment one create throws and the two lists shear.
   const decoysMade = new Map(); // entry -> [{ id, title, url }]
 
-  if (decoys) {
+  // The caller can force decoys on or off (the developer buttons, the tests,
+  // the rollback paths that never want them); when it does not say, the user's
+  // setting decides. Read here rather than at the top so the early-return paths
+  // -- nothing to hide, already hidden, a rolled-back partial -- add no storage
+  // call and keep the fault-injection call numbering they were written against.
+  const wantDecoys = decoys ?? (await settings.read()).decoys;
+
+  if (wantDecoys) {
     const entry = entries[0]; // one set is enough; the bar renders storages merged
     entry.decoyPhase = true;
     await journal.write(j);
@@ -1128,3 +1142,244 @@ export const status = () =>
       bars,
     };
   });
+
+// ---------------------------------------------------------------------------
+// Settings passthrough. The engine is the one place that already runs every
+// bookmark operation on a single chain, so a setting the popup writes and the
+// engine reads a millisecond later on the next hide cannot interleave.
+
+export const getSettings = () => settings.read();
+export const setSettings = (patch) => settings.write(patch);
+
+// ---------------------------------------------------------------------------
+// Tuck.
+//
+// A second, standing way to keep the bar clear, unrelated to screen sharing:
+// park everything on the bar inside a single folder that stays there. The
+// folder is left with an ordinary, forgettable name (the user's, defaulting to
+// a generic one), so the bar reads as tidy rather than as hidden. Untuck puts
+// every item back where the folder sat.
+//
+// It composes with hide for free: the tuck folder is an ordinary bar child, so
+// a share that starts while tucked moves the folder into the vault with
+// everything else and restore brings it back. Both refuse to run while the bar
+// is hidden -- the real items are in the vault then, and the id list would
+// describe a bar that is not currently the one on screen.
+
+async function readTuck() {
+  const got = await chrome.storage.local.get(TUCK_KEY);
+  const t = got[TUCK_KEY];
+  return Array.isArray(t?.folders) ? t.folders.map(String) : [];
+}
+
+async function writeTuck(folders) {
+  const clean = [...new Set((folders ?? []).map(String))];
+  if (clean.length === 0) await chrome.storage.local.remove(TUCK_KEY);
+  else await chrome.storage.local.set({ [TUCK_KEY]: { folders: clean } });
+}
+
+/** Which recorded folders still exist as folders, pruning the record if not. */
+async function tuckStatusImpl() {
+  const recorded = await readTuck();
+  const live = [];
+  for (const id of recorded) {
+    const node = (await chrome.bookmarks.get(id).catch(() => []))?.[0] ?? null;
+    if (node && node.url === undefined) live.push(id);
+  }
+  if (live.length !== recorded.length) await writeTuck(live);
+  const { tuckName } = await settings.read();
+  return { tucked: live.length > 0, folders: live.length, name: tuckName };
+}
+
+async function tuckImpl({ name } = {}) {
+  if (journal.isDisplaced(await journal.read())) {
+    return { ok: false, hidden: true, error: "cannot tuck while the bar is hidden" };
+  }
+  // Remember the name so the panel pre-fills it and the next tuck reuses it.
+  const saved =
+    typeof name === "string" && name.trim()
+      ? await settings.write({ tuckName: name })
+      : await settings.read();
+  const folderTitle = saved.tuckName;
+
+  const { groups } = await getGroups().catch(() => ({ groups: [] }));
+  if (groups.length === 0) return { ok: false, error: "no bookmarks bar" };
+
+  const recorded = new Set(await readTuck());
+  const isTuckFolder = (k) => k.url === undefined && recorded.has(k.id);
+  const folders = [];
+  let moved = 0;
+
+  for (const g of groups) {
+    const barKids = await childrenOrNull(g.bar.id);
+    if (barKids === null) continue;
+    // Reuse this bar's existing tuck folder if it already has one, so tucking
+    // again just sweeps in anything added since rather than nesting folders.
+    let folderId = barKids.find(isTuckFolder)?.id ?? null;
+    // Everything movable on the bar that is not itself a tuck folder -- links
+    // and folders alike, because a tidy bar means all of it goes in.
+    const loose = barKids.filter((k) => isMutable(k) && !isTuckFolder(k));
+    if (loose.length === 0) {
+      if (folderId) folders.push(folderId);
+      continue;
+    }
+    if (!folderId) {
+      const created = await bmCreate({ parentId: g.bar.id, title: folderTitle });
+      folderId = created.id;
+    }
+    for (const k of loose) {
+      try {
+        await bmMove(k.id, { parentId: folderId });
+        moved++;
+      } catch { /* one stuck item must not block the rest */ }
+    }
+    folders.push(folderId);
+  }
+
+  // Keep any recorded folder we did not revisit this pass but that still exists,
+  // so untuck never loses track of one.
+  for (const id of recorded) {
+    if (!folders.includes(id) && (await nodeExists(id))) folders.push(id);
+  }
+  await writeTuck(folders);
+  return { ok: true, tucked: folders.length > 0, folders: folders.length, moved, name: folderTitle };
+}
+
+async function untuckImpl() {
+  if (journal.isDisplaced(await journal.read())) {
+    return { ok: false, hidden: true, error: "cannot untuck while the bar is hidden" };
+  }
+  const recorded = await readTuck();
+  let restored = 0;
+  const kept = [];
+
+  for (const id of recorded) {
+    const node = (await chrome.bookmarks.get(id).catch(() => []))?.[0] ?? null;
+    if (!node) continue; // already gone
+    if (node.url !== undefined) continue; // no longer a folder -- leave it alone
+    const barId = node.parentId;
+    const kids = await childrenOrNull(id);
+    if (kids === null) {
+      kept.push(id); // unreadable this pass -- keep the record, retry later
+      continue;
+    }
+    const barKids = await childrenOrNull(barId);
+    let len = barKids === null ? 0 : barKids.length;
+    // Land the items where the folder sat, in the order they were inside it.
+    let at = typeof node.index === "number" ? node.index : len;
+    for (const k of kids) {
+      try {
+        await bmMove(k.id, { parentId: barId, index: Math.min(at, len) });
+        at++;
+        len++;
+        restored++;
+      } catch { /* keep going; a stuck item just leaves the folder non-empty */ }
+    }
+    const left = await childrenOrNull(id);
+    if (left !== null && left.length === 0) {
+      if (!(await safeRemoveTree(id))) kept.push(id);
+    } else {
+      kept.push(id); // something would not move -- keep the folder and the record
+    }
+  }
+  await writeTuck(kept);
+  return { ok: kept.length === 0, untucked: true, restored, folders: kept.length };
+}
+
+export const tuck = (opts) => serialize(() => tuckImpl(opts));
+export const untuck = () => serialize(untuckImpl);
+export const tuckStatus = () => serialize(tuckStatusImpl);
+
+// ---------------------------------------------------------------------------
+// Backup: export the bar to a portable file, and import one back.
+//
+// The reassurance this exists to give is "you can walk away with your
+// bookmarks", so export writes the standard Netscape bookmark file every
+// browser reads, and import is strictly additive: everything lands in one new
+// folder, so it can never overwrite, reorder or delete a bookmark the user
+// already had, and undoing it is deleting that one folder. Both refuse while
+// the bar is hidden, where the bar holds decoys and the real items are vaulted.
+
+/** A chrome bookmark node, narrowed to the portable shape (see portable.js). */
+function toPortableNode(node) {
+  if (node.url === undefined || node.url === null) {
+    return {
+      title: node.title ?? "",
+      dateAdded: node.dateAdded,
+      children: (node.children ?? []).map(toPortableNode),
+    };
+  }
+  return { title: node.title ?? "", url: node.url, dateAdded: node.dateAdded };
+}
+
+function defaultImportTitle() {
+  let date;
+  try {
+    date = new Date().toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  } catch {
+    date = new Date().toISOString().slice(0, 10);
+  }
+  return `Imported bookmarks — ${date}`;
+}
+
+async function exportBarImpl(format = "html") {
+  if (journal.isDisplaced(await journal.read())) {
+    return { ok: false, hidden: true, error: "bar is hidden" };
+  }
+  const { groups } = await getGroups().catch(() => ({ groups: [] }));
+  if (groups.length === 0) return { ok: false, error: "no bookmarks bar" };
+
+  const children = [];
+  for (const g of groups) {
+    const sub = await chrome.bookmarks.getSubTree(g.bar.id).catch(() => []);
+    for (const k of sub[0]?.children ?? []) children.push(toPortableNode(k));
+  }
+  const count = portable.countLinks(children);
+  const data =
+    format === "text"
+      ? portable.toTextOutline(children)
+      : portable.toNetscapeHtml(children, { title: "Bookmarks bar" });
+  return { ok: true, format: format === "text" ? "text" : "html", data, count };
+}
+
+async function importTreeImpl(nodes, { folderTitle } = {}) {
+  if (!Array.isArray(nodes) || nodes.length === 0) {
+    return { ok: false, error: "nothing to import" };
+  }
+  if (journal.isDisplaced(await journal.read())) {
+    return { ok: false, hidden: true, error: "bar is hidden" };
+  }
+  const { groups } = await getGroups().catch(() => ({ groups: [] }));
+  if (groups.length === 0) return { ok: false, error: "no bookmarks bar" };
+  const barId = groups[0].bar.id;
+  const title =
+    typeof folderTitle === "string" && folderTitle.trim()
+      ? folderTitle.trim().slice(0, 80)
+      : defaultImportTitle();
+
+  const folder = await bmCreate({ parentId: barId, title });
+  let created = 0;
+  const build = async (parentId, list) => {
+    for (const n of list ?? []) {
+      if (!n || typeof n !== "object") continue;
+      if (n.url === undefined || n.url === null) {
+        const f = await bmCreate({ parentId, title: String(n.title ?? "") });
+        await build(f.id, n.children);
+      } else if (typeof n.url === "string" && n.url) {
+        try {
+          await bmCreate({ parentId, title: String(n.title ?? ""), url: n.url });
+          created++;
+        } catch { /* a single unparseable URL must not sink the whole import */ }
+      }
+    }
+  };
+  await build(folder.id, nodes);
+  return { ok: true, created, folderId: folder.id, folderTitle: title };
+}
+
+export const exportBar = (format) => serialize(() => exportBarImpl(format));
+export const importTree = (nodes, opts) => serialize(() => importTreeImpl(nodes, opts));

@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Back up your bookmarks — Skrim</title>
+    <link rel="stylesheet" href="popup.css" />
+    <style>
+      /* A full page, not the 336px popup -- same tokens, type and mark, only the
+         layout differs, so everything but this block is inherited from popup.css.
+         The box rules popup.css writes onto `body` for a 600px-capped window are
+         undone here the same way recovery.html undoes them. */
+      body {
+        width: auto;
+        max-width: 44rem;
+        max-height: none;
+        display: block;
+        margin: 0 auto;
+        padding: 2.5rem 1.5rem 4rem;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.55 var(--font-sans);
+      }
+      h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.03em; margin: 0 0 0.4rem; }
+      h2 { font-size: 0.95rem; font-weight: 650; letter-spacing: -0.015em; margin: 2.25rem 0 0.75rem; }
+      p { margin: 0 0 0.75rem; color: var(--muted); }
+      strong { color: var(--text); font-weight: 600; }
+
+      .masthead { display: flex; align-items: center; gap: 9px; margin-bottom: 1.75rem; }
+      .masthead .mark { width: 26px; height: 26px; color: var(--accent-text); }
+      .masthead b { font-size: 0.95rem; font-weight: 650; letter-spacing: -0.01em; }
+      .lede { color: var(--text); font-size: 1rem; margin-bottom: 1.5rem; }
+
+      .card {
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-lg);
+        background: var(--surface);
+        padding: 1.1rem 1.25rem;
+        margin-bottom: 0.9rem;
+      }
+      .card h3 { margin: 0 0 0.35rem; font-size: 1rem; font-weight: 650; }
+      .card p { margin: 0 0 0.9rem; }
+      .card p:last-child { margin-bottom: 0; }
+
+      .count { color: var(--accent-text); font-weight: 600; }
+
+      .actions { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+
+      /* Buttons take a NEUTRAL ink emphasis, never green: the brand reserves
+         green for the covered state, and a backup is not that. The primary
+         action is a solid ink fill, the rest are quiet outlines. */
+      button {
+        font: inherit;
+        font-weight: 600;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-md);
+        padding: 0.55rem 1.05rem;
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+        transition: background var(--motion-micro) var(--motion-ease),
+          border-color var(--motion-micro) var(--motion-ease),
+          opacity var(--motion-micro) var(--motion-ease);
+      }
+      button:hover:not(:disabled) { background: var(--surface-2); }
+      button:focus-visible { outline: none; box-shadow: var(--ring); }
+      button:disabled { opacity: 0.5; cursor: default; }
+      button.primary {
+        background: var(--text);
+        color: var(--bg);
+        border-color: transparent;
+        font-weight: 650;
+      }
+      /* Dim on hover rather than swapping to a ramp colour: `.primary` is built
+         from --text/--bg, which flip per theme, so a fixed hue would invert it
+         in one of them. */
+      button.primary:hover:not(:disabled) { opacity: 0.88; }
+
+      .result { margin: 0.85rem 0 0; font-size: 0.9rem; min-height: 1.2em; }
+      .result[data-tone="ok"] { color: var(--accent-text); }
+      .result[data-tone="bad"] { color: var(--exposed); }
+      .result[data-tone="muted"] { color: var(--muted); }
+
+      /* The bar is hidden right now -- back it up and you would capture the
+         placeholder links, not the real bookmarks. Amber: attention, not alarm. */
+      .banner {
+        border: 1px solid color-mix(in srgb, var(--attention-dot) 34%, transparent);
+        background: var(--attention-tint);
+        color: var(--attention);
+        border-radius: var(--radius-lg);
+        padding: 0.85rem 1.1rem;
+        margin-bottom: 1.25rem;
+        font-size: 0.9rem;
+      }
+      .banner b { font-weight: 650; }
+
+      .filehint { font-size: 0.82rem; color: var(--faint); margin: 0.6rem 0 0; }
+      .visually-hidden {
+        position: absolute; width: 1px; height: 1px; margin: -1px;
+        padding: 0; border: 0; clip: rect(0 0 0 0); overflow: hidden;
+      }
+      .safe {
+        margin-top: 1.5rem; font-size: 0.85rem; color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <svg width="0" height="0" aria-hidden="true" style="position: absolute">
+      <defs>
+        <clipPath id="scrimClip">
+          <rect x="2" y="2" width="28" height="28" rx="6" />
+        </clipPath>
+      </defs>
+    </svg>
+
+    <div class="masthead">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+        <g clip-path="url(#scrimClip)">
+          <rect class="mark__line" x="7.5" y="8.5" width="12" height="3" rx="1.5" />
+          <rect class="mark__line" x="7.5" y="14.5" width="15" height="3" rx="1.5" />
+          <rect class="mark__line" x="7.5" y="20.5" width="10" height="3" rx="1.5" />
+          <rect class="mark__scrim" x="2" y="2" width="28" height="28" />
+        </g>
+        <rect class="mark__edge" x="3.125" y="3.125" width="25.75" height="25.75" rx="4.875" />
+      </svg>
+      <b>Skrim</b>
+    </div>
+
+    <h1>Back up your bookmarks</h1>
+    <p class="lede">
+      Keep your own copy of your bookmarks bar — so trying an extension that
+      rearranges it never comes with the worry of losing them. This reads and
+      writes the standard bookmark file every browser can import, and it never
+      touches or deletes anything you already have.
+    </p>
+
+    <div class="banner" id="banner" hidden>
+      <b>Your bar is hidden right now.</b>
+      <span id="bannerText"
+        >Restore it first — otherwise a backup would capture the placeholder
+        links instead of your real bookmarks.</span
+      >
+    </div>
+
+    <div class="card">
+      <h3>Save a copy</h3>
+      <p id="exportLede">Reading your bookmarks bar…</p>
+      <div class="actions">
+        <button id="download" class="primary" type="button" disabled>Download file</button>
+        <button id="copy" type="button" disabled>Copy to clipboard</button>
+      </div>
+      <p class="result" id="exportResult" data-tone="muted"></p>
+    </div>
+
+    <div class="card">
+      <h3>Restore from a file</h3>
+      <p>
+        Import a bookmark file — one you saved here, or one exported from Chrome,
+        Firefox, Safari or Edge. Everything lands in a single new folder on your
+        bar, so it is easy to review and nothing you already have is changed.
+      </p>
+      <div class="actions">
+        <button id="importBtn" type="button">Choose a file…</button>
+        <input
+          id="importFile"
+          class="visually-hidden"
+          type="file"
+          accept=".html,.htm,text/html"
+        />
+      </div>
+      <p class="filehint">Accepts a Netscape bookmark file (.html).</p>
+      <p class="result" id="importResult" data-tone="muted"></p>
+    </div>
+
+    <p class="safe">
+      Nothing here is ever sent anywhere — this reads your bookmarks on your own
+      computer and writes a file to it. Skrim makes no network requests.
+    </p>
+
+    <script type="module" src="backup.js"></script>
+  </body>
+</html>
