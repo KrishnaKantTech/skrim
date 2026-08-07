@@ -99,7 +99,7 @@ ONE THING TO KNOW IF YOU USE CHROME SYNC
 
 Bookmarks are synced data, so while your bar is hidden here it is also empty on your other signed-in devices. That is Chrome's sync doing exactly what you turned it on to do — Skrim sends nothing anywhere.
 
-It costs less than it sounds. A shared tab cannot contain the bookmarks bar, so as soon as Chrome confirms you picked a tab, Skrim releases the hide and the bar comes straight back — here immediately, on your other devices a couple of seconds later. Tab sharing is what Meet and Zoom suggest by default. A window or whole-screen share is the case that genuinely holds the bar down for the length of the meeting. On the other device, Skrim explains what happened and offers to bring the bar back.
+It costs less than it sounds. A shared tab cannot contain the bookmarks bar, so as soon as Chrome confirms you picked a tab, Skrim releases the hide and the bar comes straight back — here immediately, on your other devices a couple of seconds later. Tab sharing is what Meet and Zoom suggest by default. A window or whole-screen share is the case that genuinely holds the bar down for the length of the meeting. On the other device, Skrim explains what happened and offers to bring the bar back. Or turn on Tuck into a folder in the settings and the situation never comes up: instead of clearing the bar, Skrim parks it inside one folder that stays put, so your other computers keep their bookmarks — they just see a single tidy folder while you present.
 
 REQUIREMENTS
 
