@@ -70,7 +70,7 @@
   <body>
     <h1>Skrim — Privacy Policy</h1>
     <p class="stamp">
-      Effective 6 August 2026. This policy is about the Skrim Chrome extension.
+      Effective 7 August 2026. This policy is about the Skrim Chrome extension.
       The website it is served from, skrim.app, is a different and much shorter
       story, and has <a href="#website">its own section at the end</a>.
     </p>
@@ -106,9 +106,28 @@
       <li>When the share ends, every bookmark goes back to its original position, and the folder, the placeholders and the receipt are deleted.</li>
     </ol>
     <p>
-      Nothing is ever deleted permanently and nothing is copied out of your
-      browser. If a share, the browser or the machine dies mid-way, the next
-      startup finishes the restore.
+      If you turn on <strong>Tuck into a folder</strong> in the popup, step 1
+      changes: instead of the Other-bookmarks vault, your bar is parked inside a
+      single folder you name that stays on the bar, so your other synced
+      computers keep their bookmarks. It is still a move inside your own tree,
+      with nothing copied out.
+    </p>
+    <p>
+      During a hide, nothing is ever deleted permanently and nothing is copied
+      out of your browser. If a share, the browser or the machine dies mid-way,
+      the next startup finishes the restore.
+    </p>
+
+    <h2>Backing up your bookmarks</h2>
+    <p>
+      Because Skrim moves your real bookmarks, the popup offers an optional
+      backup, so trying it never risks them. When you ask for one, Skrim reads
+      your bookmark tree and saves it as an ordinary HTML bookmarks file to your
+      downloads — the same format Chrome itself exports. That file is created
+      inside your browser and is <strong>never uploaded or sent anywhere</strong>;
+      where it goes next is up to you. Import reads a file <em>you</em> pick and
+      adds its bookmarks back. Both are started by hand — Skrim never exports or
+      imports on its own, and neither touches the network.
     </p>
 
     <h2>What is stored, where, and when it goes away</h2>
@@ -134,6 +153,11 @@
             <td>Cleared on the next successful restore</td>
           </tr>
           <tr>
+            <td>Your settings — placeholder links on or off, and the tuck folder's name. Preferences only, never bookmark content; stored locally, so they do not sync</td>
+            <td><code>chrome.storage.local</code></td>
+            <td>Deleted when you uninstall</td>
+          </tr>
+          <tr>
             <td>Live share bookkeeping — which tab and frame is currently sharing, and when it last checked in. No URLs, no page data.</td>
             <td><code>chrome.storage.session</code></td>
             <td>Deleted by Chrome when you close the browser</td>
@@ -147,7 +171,7 @@
       </table>
     </div>
     <p>
-      Uninstalling the extension makes Chrome delete everything in the first four
+      Uninstalling the extension makes Chrome delete everything in the first five
       rows. Your bookmarks are yours and stay where they are.
     </p>
 
@@ -160,11 +184,11 @@
         <tbody>
           <tr>
             <td><code>bookmarks</code></td>
-            <td>The whole feature. Read what is on the bar, move it into the folder, add the placeholders and the receipt, then move everything back. Bookmarks are read and rearranged in place; they are never copied, uploaded or transmitted.</td>
+            <td>The whole feature. Read what is on the bar, move it into the folder, add the placeholders and the receipt, then move everything back. The same permission reads your tree when you ask for a backup. Bookmarks are rearranged in place and never uploaded or transmitted — a backup is a local file, and only ever one you asked for.</td>
           </tr>
           <tr>
             <td><code>storage</code></td>
-            <td>Keep the records in the table above, so an interrupted hide can always be repaired. Local to your profile.</td>
+            <td>Keep the records in the table above — the crash-safety bookkeeping and your settings — so an interrupted hide can always be repaired and your preferences persist. Local to your profile.</td>
           </tr>
           <tr>
             <td><code>alarms</code></td>

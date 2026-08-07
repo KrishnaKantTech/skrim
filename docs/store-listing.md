@@ -149,11 +149,11 @@ There is no alternative: Chrome exposes no API for bookmarks-bar visibility (it 
 ### Permission justification — `storage`
 
 ```
-Used only for crash safety, and only inside the user's own profile.
+Used for crash safety and to store the user's settings, inside the user's own profile only.
 
-chrome.storage.local holds three things: a journal of which bookmark IDs were moved and what index each one came from (IDs and positions only — never titles or URLs), the IDs of the folder and placeholder links Skrim itself created so that a cleanup can never touch one of the user's own bookmarks, and a last-failure record shown on the recovery screen when a restore could not finish. chrome.storage.session holds which tab and frame is currently sharing and when it last checked in.
+chrome.storage.local holds: a journal of which bookmark IDs moved and from what index (IDs and positions only — never titles or URLs); the IDs of the folder and placeholders Skrim created, so cleanup never touches the user's own; a last-failure record shown on the recovery screen; and the user's settings (decoys on/off and the tuck folder name — preferences only). chrome.storage.session holds which tab and frame is sharing and when it last checked in.
 
-Each record is deleted as soon as the restore it protects is verified complete; the session data is dropped by Chrome when the browser closes.
+The crash records are deleted once the restore each protects is verified; the settings persist until changed or uninstalled; the session data drops when the browser closes.
 
 Without it there is no way to be safe. A Chrome crash, an extension update, or a service-worker shutdown in the middle of a hide would otherwise leave the user's bookmarks sitting in a folder with nothing left that knows where they belong.
 ```
@@ -249,7 +249,7 @@ the exact size.
 | Screenshot 3 | `brand/store/screenshot-3-restore.png` | 1280×800 |
 | Screenshot 4 | `brand/store/screenshot-4-privacy.png` | 1280×800 |
 | Screenshot 5 | `brand/store/screenshot-5-coverage.png` | 1280×800 |
-| Small promo tile | `brand/store/promo-tile-440x220.png` | 440×220 |
+| Small promo tile | `brand/store/promo-tile-440x280.png` | 440×280 |
 
 No marquee tile (1400×560). That field only matters if the extension is
 featured, and it can be added later without touching anything else here.
@@ -305,7 +305,7 @@ after a crash.
 | --- | --- | --- |
 | 1 | ~~Privacy policy URL~~ | **Done** — `https://skrim.app/privacy`, live |
 | 2 | ~~Screenshots (1280×800)~~ | **Done** — five, `brand/store/` |
-| 3 | ~~Small promo tile (440×220)~~ | **Done** — `brand/store/promo-tile-440x220.png` |
+| 3 | ~~Small promo tile (440×280)~~ | **Done** — `brand/store/promo-tile-440x280.png` |
 | 4 | ~~Clean-profile walk, no dev mode~~ | **Done** — see below |
 
 **Nothing is blocking submission.**
