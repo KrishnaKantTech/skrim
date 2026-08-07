@@ -259,7 +259,7 @@ refuses a re-upload at a version it has already seen, which is exactly the wall
 you hit mid-rejection-round when you are least in the mood for it.
 
 **The store images are built**: `brand/store/`, five screenshots at 1280×800
-and the small promo tile at 440×220, from `tools/make-store-assets.mjs`. The
+and the small promo tile at 440×280, from `tools/make-store-assets.mjs`. The
 popup in them is the real popup — `popup-preview.mjs` already serves the shipped
 `popup.{html,css,js}` against stubbed fixtures, so the generator mounts that
 same handler behind its own routes and iframes the result, same-origin so it can

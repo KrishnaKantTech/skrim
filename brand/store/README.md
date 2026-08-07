@@ -18,7 +18,7 @@ will want them; the dashboard rejects anything that is not the exact size.
 | `screenshot-3-restore.png` | 1280×800 | Screenshot 3 |
 | `screenshot-4-privacy.png` | 1280×800 | Screenshot 4 |
 | `screenshot-5-coverage.png` | 1280×800 | Screenshot 5 |
-| `promo-tile-440x220.png` | 440×220 | Small promo tile |
+| `promo-tile-440x280.png` | 440×280 | Small promo tile |
 
 Nothing here needs a marquee tile (1400×560) — that field is only used if the
 extension is featured, and it can be added later without touching the listing.

@@ -2,7 +2,7 @@
 //
 //   node tools/make-store-assets.mjs
 //
-// Five screenshots at 1280x800 and the small promo tile at 440x220 -- the exact
+// Five screenshots at 1280x800 and the small promo tile at 440x280 -- the exact
 // sizes the Developer Dashboard accepts, written out to brand/store/.
 //
 // The store has no caption field: whatever a screenshot says, it says inside
@@ -343,13 +343,13 @@ const SHOTS = [
 
 // ------------------------------------------------------------- promo tile
 
-// 440x220, and it is shown at that size or smaller in search results, so it
+// 440x280, and it is shown at that size or smaller in search results, so it
 // gets the mark's own geometry and almost no words: the scrim parked at its
-// resting 41%, the lit edge, and two rows of bookmarks caught mid-swallow.
+// resting 41%, the lit edge, and rows of bookmarks caught mid-swallow.
 const TILE = () => `
 <div class="tile">
   <div class="tchips">
-    ${[EXPOSED.slice(0, 4), EXPOSED.slice(4, 8), EXPOSED.slice(1, 5), EXPOSED.slice(5, 9)]
+    ${[EXPOSED.slice(0, 4), EXPOSED.slice(4, 8), EXPOSED.slice(1, 5), EXPOSED.slice(5, 9), EXPOSED.slice(2, 6), EXPOSED.slice(6, 10)]
       .map(
         (row) =>
           `<div class="trow">${row.map((l, i) => bookmark(l, TONES[i % TONES.length])).join("")}</div>`,
@@ -531,7 +531,7 @@ body { font-family:"Instrument Sans", -apple-system, sans-serif;
 
 /* ------------------------------------------------------------ promo tile */
 
-.tile { position:relative; width:440px; height:220px; overflow:hidden;
+.tile { position:relative; width:440px; height:280px; overflow:hidden;
   background:${T.ink950}; }
 .tile::before { content:""; position:absolute; inset:0;
   background:radial-gradient(70% 55% at 18% 92%, rgba(23,222,130,.05), transparent 70%); }
@@ -596,7 +596,7 @@ const page = (body) =>
  */
 export const IMAGES = [
   ...SHOTS.map((s) => ({ file: `${s.name}.png`, w: W, h: H, field: "Screenshot" })),
-  { file: "promo-tile-440x220.png", w: 440, h: 220, field: "Small promo tile" },
+  { file: "promo-tile-440x280.png", w: 440, h: 280, field: "Small promo tile" },
 ];
 
 const ROUTES = new Map([
@@ -652,7 +652,7 @@ async function main() {
 
   const base = `http://localhost:${PORT}`;
   for (const s of SHOTS) await capture(`${base}/shot/${s.name}`, join(OUT, `${s.name}.png`), W, H);
-  await capture(`${base}/shot/promo-tile`, join(OUT, "promo-tile-440x220.png"), 440, 220);
+  await capture(`${base}/shot/promo-tile`, join(OUT, "promo-tile-440x280.png"), 440, 280);
 
   // The composition HTML, kept for a look in a real browser.
   const work = join(tmpdir(), `skrim-store-${process.pid}`);
