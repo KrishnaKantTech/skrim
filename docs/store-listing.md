@@ -141,7 +141,7 @@ This permission is the feature itself; the extension does nothing else.
 
 When a screen share starts, Skrim reads the children of the bookmarks-bar node, creates a folder under Other Bookmarks, and moves each item into it. It adds a few placeholder links so the bar does not look conspicuously empty, plus one receipt bookmark whose title tells the user how to reverse the change by hand. When the share ends it moves every item back to its recorded index and deletes the folder, the placeholders and the receipt.
 
-Bookmarks are read and rearranged in place inside the user's own profile — never copied out, never uploaded, never transmitted. The extension makes no network requests of any kind. Nothing is deleted permanently: every item Skrim removes is one Skrim itself created.
+Bookmarks are read and rearranged in place inside the user's own profile — never uploaded, never transmitted. The extension makes no network requests of any kind. Nothing is deleted permanently: every item Skrim removes is one Skrim itself created.
 
 There is no alternative: Chrome exposes no API for bookmarks-bar visibility (it is a preference, not an extension surface), so moving the bookmarks is the only way to clear the bar.
 ```
