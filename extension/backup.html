@@ -59,21 +59,42 @@
         cursor: pointer;
         transition: background var(--motion-micro) var(--motion-ease),
           border-color var(--motion-micro) var(--motion-ease),
-          opacity var(--motion-micro) var(--motion-ease);
+          box-shadow var(--motion-micro) var(--motion-ease),
+          opacity var(--motion-micro) var(--motion-ease),
+          transform 60ms var(--motion-ease);
       }
-      button:hover:not(:disabled) { background: var(--surface-2); }
+      /* The quiet outline moves its border too. A tint swap alone is nearly
+         invisible here, because the button sits on a card that is already
+         --surface. Same reasoning as .btn--primary[data-action="restore"]. */
+      button:hover:not(:disabled) {
+        background: var(--surface-2);
+        border-color: var(--muted);
+      }
       button:focus-visible { outline: none; box-shadow: var(--ring); }
+      button:active:not(:disabled) { transform: scale(0.988); }
       button:disabled { opacity: 0.5; cursor: default; }
+      /* Neutral ink, from the --ink semantic set: hover drives the fill to
+         maximum ink and lifts it, so the button gains weight under the cursor.
+         Opacity belongs to :disabled alone -- fading a fill on hover sends the
+         one signal a live button must never send. */
       button.primary {
-        background: var(--text);
-        color: var(--bg);
+        background: var(--ink);
+        color: var(--on-ink);
         border-color: transparent;
         font-weight: 650;
       }
-      /* Dim on hover rather than swapping to a ramp colour: `.primary` is built
-         from --text/--bg, which flip per theme, so a fixed hue would invert it
-         in one of them. */
-      button.primary:hover:not(:disabled) { opacity: 0.88; }
+      button.primary:hover:not(:disabled) {
+        background: var(--ink-hover);
+        box-shadow: var(--ink-lift);
+      }
+      /* Press flattens what hover lifted. */
+      button.primary:active:not(:disabled) {
+        background: var(--ink-hover);
+        box-shadow: none;
+      }
+      /* Focus wins the shadow slot outright -- the ring must never be traded
+         away for the lift while the button is both focused and hovered. */
+      button.primary:focus-visible:not(:disabled) { box-shadow: var(--ring); }
 
       .result { margin: 0.85rem 0 0; font-size: 0.9rem; min-height: 1.2em; }
       .result[data-tone="ok"] { color: var(--accent-text); }

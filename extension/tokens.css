@@ -94,6 +94,18 @@
   --muted:         var(--ink-600);
   --faint:         var(--ink-500);   /* non-text only: see the ramp comment */
 
+  /* The neutral solid fill — a page-level primary action that is NOT the covered
+     state, so it cannot be green. Sibling of --accent, same shape of name.
+     It rests one step off the end of the ramp on purpose: that headroom is what
+     lets hover move TOWARD maximum ink instead of fading, which is the only way
+     a solid fill can gain presence in both themes (dimming it reads as
+     disabled). Never build this out of --text/--bg -- those flip per theme and
+     the hover step would invert with them. */
+  --ink:           var(--ink-900);
+  --ink-hover:     var(--ink-950);
+  --on-ink:        var(--ink-0);     /* 17.36:1 on --ink, 19.60:1 on --ink-hover */
+  --ink-lift:      0 1px 2px rgba(10, 16, 14, .28), 0 6px 16px rgba(10, 16, 14, .20);
+
   --accent:        var(--green-400); /* fill */
   --accent-hover:  var(--green-500);
   --accent-active: var(--green-600);
@@ -128,6 +140,14 @@
     --text:        var(--ink-100);
     --muted:       var(--ink-400);   /* ink-500 only reaches 3.73:1 here — do not use for text */
     --faint:       var(--ink-400);
+
+    /* Same move, mirrored: rest one step short of white, hover all the way to
+       it. The lift becomes a glow of the fill's own light, because a dark
+       shadow is invisible against an ink-950 page. */
+    --ink:           var(--ink-200);
+    --ink-hover:     var(--ink-0);
+    --on-ink:        var(--ink-950); /* 15.55:1 on --ink, 19.60:1 on --ink-hover */
+    --ink-lift:      0 3px 14px rgba(234, 237, 235, .20);
 
     /* the fill does not change between themes: the brand is one green */
     --accent:        var(--green-400);
