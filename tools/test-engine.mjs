@@ -22,8 +22,12 @@ for (const f of fs.readdirSync(SRC)) {
   if (f.endsWith(".js")) fs.copyFileSync(path.join(SRC, f), path.join(BUILD, f));
 }
 // The popup lives a directory up and is not a module the worker imports, but it
-// makes two decisions that are not cosmetic -- see the P-* layer.
-fs.copyFileSync(path.join(SRC, "..", "popup.js"), path.join(BUILD, "popup.js"));
+// makes two decisions that are not cosmetic -- see the P-* layer. src/ flattens
+// into BUILD, so its "./src/x.js" imports are rewritten to match.
+fs.writeFileSync(
+  path.join(BUILD, "popup.js"),
+  fs.readFileSync(path.join(SRC, "..", "popup.js"), "utf8").replaceAll('"./src/', '"./'),
+);
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -2873,6 +2877,13 @@ async function testExportBarSerializes() {
   check("export: the text outline shows folders and links",
     text.ok === true && text.data.includes("Work/") && text.data.includes("Docs — https://d.example/1"),
     text.data.slice(0, 60));
+  // The clipboard write sends both flavours, so the text export has to carry
+  // the HTML one with it or a paste into a doc silently degrades to raw text.
+  check("export: the text format also carries the clipboard's HTML flavour",
+    typeof text.rich === "string" && text.rich.includes('<a href="https://d.example/1">Docs</a>'),
+    String(text.rich).slice(0, 80));
+  check("export: the html format carries no rich flavour it has no use for",
+    res.rich === undefined);
 }
 
 async function testExportRefusesWhileHidden() {
@@ -2948,6 +2959,44 @@ async function testPortableRoundTrip() {
   check("portable: a tree survives serialise -> parse unchanged",
     JSON.stringify(shapeOf(back)) === JSON.stringify(shapeOf(tree)), JSON.stringify(shapeOf(back)));
   check("portable: link count is preserved", portableMod.countLinks(back) === 3);
+}
+
+// The clipboard's HTML flavour. It is not re-parsed by anything -- it is read
+// by whatever the user pastes into -- so what matters is that the structure and
+// the escaping are right, and that a hostile URL cannot arrive as a live link
+// in someone else's document.
+async function testPortableHtmlLinks() {
+  const tree = [
+    { title: "Work", children: [
+      { title: "A & B", url: "https://a.example/?x=1&y=2" },
+      { title: "Nested", children: [{ title: "Leaf", url: "https://d.example/2" }] },
+    ] },
+    { title: "", url: "https://untitled.example/" },
+  ];
+  const html = portableMod.toHtmlLinks(tree);
+  check("clipboard html: folders nest as lists",
+    html.includes("<strong>Work</strong><ul>") && html.includes("<strong>Nested</strong><ul>"), html);
+  check("clipboard html: a link is a real anchor",
+    html.includes('<a href="https://d.example/2">Leaf</a>'), html);
+  check("clipboard html: ampersands are escaped in both title and href",
+    html.includes('href="https://a.example/?x=1&amp;y=2"') && html.includes(">A &amp; B</a>"), html);
+  check("clipboard html: an untitled link falls back to its URL as the text",
+    html.includes(">https://untitled.example/</a>"), html);
+
+  const nasty = portableMod.toHtmlLinks([
+    { title: "Click me", url: "javascript:alert(1)" },
+    { title: "Data", url: "  DATA:text/html,<script>x</script>" },
+    { title: "Mail", url: "mailto:a@b.example" },
+  ]);
+  check("clipboard html: a javascript: URL is stripped of its anchor",
+    !nasty.includes("javascript:") && nasty.includes("<li>Click me</li>"), nasty);
+  check("clipboard html: a padded, upper-case data: URL is stripped too",
+    !/href="\s*DATA:/i.test(nasty) && !nasty.includes("<script>"), nasty);
+  check("clipboard html: mailto: stays a link",
+    nasty.includes('<a href="mailto:a@b.example">Mail</a>'), nasty);
+
+  check("clipboard html: an empty bar produces nothing rather than an empty list",
+    portableMod.toHtmlLinks([]) === "", portableMod.toHtmlLinks([]));
 }
 
 async function testPortableParsesAStandardExport() {
@@ -3099,6 +3148,7 @@ await testExportRefusesWhileHidden();
 await testImportAddsAFolderNonDestructively();
 await testImportRefusesWhileHidden();
 await testPortableRoundTrip();
+await testPortableHtmlLinks();
 await testPortableParsesAStandardExport();
 await testPortableEscapesAndUnescapes();
 await testPortableToleratesMalformedInput();

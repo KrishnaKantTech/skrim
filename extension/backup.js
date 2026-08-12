@@ -13,6 +13,7 @@
 
 import * as engine from "./src/engine.js";
 import * as portable from "./src/portable.js";
+import { copyBookmarks } from "./src/clipboard.js";
 
 const $ = (id) => document.getElementById(id);
 const WORKER_TIMEOUT_MS = 2000;
@@ -131,6 +132,10 @@ $("download").onclick = async () => {
   btn.blur();
 };
 
+// As text and as links, for a note or a message. Not for Chrome's bookmark
+// manager -- it pastes only from its own internal format, which nothing outside
+// Chrome can write; that is what the download and the import below are for. The
+// success message says so, because the button alone reads like it should work.
 $("copy").onclick = async () => {
   const res = await exportBar("text").catch(() => null);
   if (!res?.ok || !res.data) {
@@ -141,10 +146,14 @@ $("copy").onclick = async () => {
     );
     return;
   }
-  try {
-    await navigator.clipboard.writeText(res.data);
-    setResult($("exportResult"), "ok", `Copied ${plural(res.count ?? 0, "bookmark")} to the clipboard.`);
-  } catch {
+  if (await copyBookmarks(res.data, res.rich)) {
+    setResult(
+      $("exportResult"),
+      "ok",
+      `Copied ${plural(res.count ?? 0, "bookmark")} as text and links — ready to paste into a note or a message. ` +
+        "To put them back into a browser, use Download file and that browser's own import.",
+    );
+  } else {
     setResult($("exportResult"), "bad", "The browser blocked the copy. Try the download instead.");
   }
 };

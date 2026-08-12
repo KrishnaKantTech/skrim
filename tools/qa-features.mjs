@@ -271,6 +271,24 @@ async function main() {
     check("Q17", clip.includes("Clients/") && clip.includes("Acme Corp") && clip.includes("Globex"),
       "and the clipboard holds the real outline, folders and all", clip.slice(0, 60).replace(/\n/g, " "));
 
+    // The HTML flavour rides along, so a paste into a doc or a message arrives
+    // as clickable links rather than raw text. Browser-only: the write goes
+    // through ClipboardItem, which the Node suite has no way to exercise.
+    const clipHtml = await B(`
+      try {
+        const items = await navigator.clipboard.read();
+        const types = items.flatMap((i) => i.types);
+        if (!types.includes("text/html")) return "NO-HTML:" + types.join(",");
+        for (const i of items) {
+          if (i.types.includes("text/html")) return await (await i.getType("text/html")).text();
+        }
+        return "NO-HTML";
+      } catch (e) { return "ERR:" + e.message; }
+    `, { userGesture: true });
+    check("Q17b", /<a href="https:\/\/example\.com\/acme"/.test(clipHtml) && /<strong>Clients<\/strong>/.test(clipHtml),
+      "and an HTML flavour too, so a paste into a doc lands as real links",
+      clipHtml.replace(/\s+/g, " ").slice(0, 70));
+
     // download -> capture the file off disk and parse it back
     rmSync(downloads, { recursive: true, force: true }); mkdirSync(downloads, { recursive: true });
     await B(`document.getElementById("download").click();`, { userGesture: true });

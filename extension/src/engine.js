@@ -1479,11 +1479,23 @@ async function exportBarImpl(format = "html") {
     for (const k of sub[0]?.children ?? []) children.push(toPortableNode(k));
   }
   const count = portable.countLinks(children);
-  const data =
-    format === "text"
-      ? portable.toTextOutline(children)
-      : portable.toNetscapeHtml(children, { title: "Bookmarks bar" });
-  return { ok: true, format: format === "text" ? "text" : "html", data, count };
+  if (format === "text") {
+    // `rich` rides along for the clipboard's HTML flavour. Additive: a caller
+    // that only knows about `data` is unaffected.
+    return {
+      ok: true,
+      format: "text",
+      data: portable.toTextOutline(children),
+      rich: portable.toHtmlLinks(children),
+      count,
+    };
+  }
+  return {
+    ok: true,
+    format: "html",
+    data: portable.toNetscapeHtml(children, { title: "Bookmarks bar" }),
+    count,
+  };
 }
 
 async function importTreeImpl(nodes, { folderTitle } = {}) {

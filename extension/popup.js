@@ -9,6 +9,8 @@
 // the forced recover, the raw response) that the live test and manual walks
 // depend on -- kept for an unpacked copy, off for an installed one. See `DEV`.
 
+import { copyBookmarks } from "./src/clipboard.js";
+
 const $ = (id) => document.getElementById(id);
 
 const POLL_MS = 1800;
@@ -470,14 +472,14 @@ $("tuckName").oninput = () => {
 };
 $("tuckName").onblur = saveTuckName;
 
+// Copies as text and as links -- not into Chrome's bookmark manager, which
+// pastes only from its own internal format. Moving bookmarks into a browser is
+// Download / import; see src/clipboard.js.
 $("copyBtn").onclick = async (e) => {
   const btn = e.currentTarget;
   const res = await send("exportBar", { format: "text" }).catch(() => null);
   if (res?.ok && res.data) {
-    const wrote = await navigator.clipboard
-      .writeText(res.data)
-      .then(() => true)
-      .catch(() => false);
+    const wrote = await copyBookmarks(res.data, res.rich);
     flash(btn, wrote ? "Copied ✓" : "Press ⌘/Ctrl+C");
   } else {
     flash(btn, res?.hidden ? "Restore first" : "Nothing to copy");

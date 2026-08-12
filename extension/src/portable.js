@@ -88,6 +88,15 @@ export function toNetscapeHtml(children, { title = "Bookmarks" } = {}) {
  * slash and links read `Title — url`; two spaces of indent per level. This is
  * for a human pasting into a note, not for re-import -- the download is the
  * re-importable artifact.
+ *
+ * Worth being explicit about what the clipboard cannot do, because it reads
+ * like a bug otherwise: Chrome's own bookmark manager pastes only from a
+ * pickled internal format it writes for itself, and neither an extension nor a
+ * page can put that on the clipboard -- `navigator.clipboard` namespaces any
+ * custom type as a *web* format the manager never looks at. So copying can
+ * never feed the bookmark manager; moving bookmarks into a browser is the
+ * download plus that browser's own import. The clipboard's job here is the
+ * note, the message, the doc -- which is why it also travels as HTML below.
  */
 export function toTextOutline(children) {
   const lines = [];
@@ -105,6 +114,44 @@ export function toTextOutline(children) {
   };
   walk(children, 0);
   return lines.join("\n");
+}
+
+/**
+ * The same tree as an HTML fragment, to ride the clipboard alongside the text
+ * outline. Nested `<ul>`, one `<a>` per link, folders as a bold label -- plain
+ * enough to survive the sanitiser every rich-text target runs paste through,
+ * and to degrade to something readable in the ones that strip lists.
+ *
+ * Deliberately not the Netscape `<DL><DT>` shape: that format is for a file an
+ * importer parses, and pasted into a document it renders as an unindented run
+ * of links. Two different jobs, two different serialisers.
+ */
+export function toHtmlLinks(children) {
+  const walk = (nodes, depth) => {
+    const items = [];
+    for (const n of nodes ?? []) {
+      if (n.url === undefined || n.url === null) {
+        const label = escapeHtml(n.title || "(unnamed folder)");
+        items.push(`<li><strong>${label}</strong>${walk(n.children, depth + 1)}</li>`);
+      } else {
+        // A javascript: or data: URL in an href is inert on the clipboard but
+        // not in whatever the user pastes into, so only web-shaped links keep
+        // their anchor; anything else travels as its own text.
+        const href = escapeHtml(n.url);
+        const text = escapeHtml(n.title || n.url);
+        items.push(
+          isSafeHref(n.url) ? `<li><a href="${href}">${text}</a></li>` : `<li>${text}</li>`,
+        );
+      }
+    }
+    return items.length ? `<ul>${items.join("")}</ul>` : "";
+  };
+  return walk(children, 0);
+}
+
+/** Schemes safe to leave as a live anchor in someone else's document. */
+function isSafeHref(url) {
+  return /^(https?|ftp|mailto):/i.test(String(url ?? "").trim());
 }
 
 // ---------------------------------------------------------------------------
