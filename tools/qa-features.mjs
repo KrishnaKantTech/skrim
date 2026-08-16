@@ -246,6 +246,62 @@ async function main() {
     await sleep(500);
     check("Q13", JSON.stringify(await barSnapshot(cdp, sw)) === seededSnap, "restoring untucks the bar byte-identically");
 
+    // ---- FEATURE 2b: the switches, flipped WHILE THE BAR IS HIDDEN ---------
+    // The point of the whole feature: mid-call, the bar already down, a user
+    // changes their mind. Every check below is on the REAL bar in a REAL
+    // browser between clicks on the REAL toggles -- no re-hide anywhere.
+    const liveNote = () => P(`const n = document.getElementById("liveNote"); return { hidden: n.hidden, text: n.textContent, tone: n.dataset.tone ?? null };`);
+    const vaults = () => aeval(cdp, sw, `return (await chrome.bookmarks.search({})).filter(n => !n.url && /^Skrim —/.test(n.title)).length;`);
+
+    await msg({ type: "conceal" }); // tuck mode is still on from Q10
+    await sleep(600);
+    const tucked = await barSnapshot(cdp, sw);
+    check("QL1", tucked.length === 1 && tucked[0].t === "My Links" && tucked[0].c.length === SEED.length,
+      "live: precondition — the bar is hidden, tucked into one folder", JSON.stringify(tucked.map((n) => n.t)));
+
+    // tuck OFF, mid-hide: the folder should leave the bar and the bookmarks
+    // should end up in a vault, without ever appearing on screen.
+    await P(`document.querySelector('label[for="tuckToggle"] .switch__track').click();`, { userGesture: true });
+    await sleep(1200);
+    const afterUntuck = await barTitles(cdp, sw);
+    const untuckStatus = await msg({ type: "status" });
+    check("QL2", afterUntuck.length === 6 && afterUntuck.includes("Google") && !afterUntuck.includes("My Links"),
+      "live: flipping tuck OFF mid-hide clears the folder off the bar", afterUntuck.join(","));
+    check("QL3", (await vaults()) === 1 && untuckStatus.mode === "vault" && untuckStatus.hidden === true &&
+      untuckStatus.itemsDisplaced === SEED.length,
+      "live: and the same hide is now a vault hide, still holding everything",
+      JSON.stringify({ mode: untuckStatus.mode, n: untuckStatus.itemsDisplaced }));
+    const noteA = await liveNote();
+    check("QL4", noteA.hidden === false && /parked away/.test(noteA.text),
+      "live: the panel says what it just did", noteA.text.trim());
+
+    // placeholders OFF, then ON, with the bar still down
+    await P(`document.getElementById("decoyToggle").click();`, { userGesture: true });
+    await sleep(900);
+    check("QL5", (await barTitles(cdp, sw)).length === 0,
+      "live: switching placeholders off empties the hidden bar immediately",
+      (await barTitles(cdp, sw)).join(","));
+    await P(`document.getElementById("decoyToggle").click();`, { userGesture: true });
+    await sleep(900);
+    const backOn = await barTitles(cdp, sw);
+    check("QL6", backOn.length === 6 && backOn.includes("Calendar"),
+      "live: and switching them back on puts them straight back", backOn.join(","));
+
+    // tuck ON again, still mid-hide: back to one folder, no vault
+    await P(`document.querySelector('label[for="tuckToggle"] .switch__track').click();`, { userGesture: true });
+    await sleep(1200);
+    const reTucked = await barSnapshot(cdp, sw);
+    const reStatus = await msg({ type: "status" });
+    check("QL7", reTucked.length === 1 && reTucked[0].t === "My Links" && reTucked[0].c.length === SEED.length &&
+      (await vaults()) === 0 && reStatus.mode === "tuck",
+      "live: flipping tuck back ON mid-hide re-folds it, vault and all",
+      JSON.stringify({ bar: reTucked.map((n) => n.t), inside: reTucked[0]?.c?.length, mode: reStatus.mode }));
+
+    await msg({ type: "restore" });
+    await sleep(600);
+    check("QL8", JSON.stringify(await barSnapshot(cdp, sw)) === seededSnap,
+      "live: after four conversions mid-hide, restore is still byte-identical");
+
     // leave tuck mode off for the backup tests that follow
     await P(`document.querySelector('label[for="tuckToggle"] .switch__track').click();`, { userGesture: true });
     await sleep(300);

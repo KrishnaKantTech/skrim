@@ -417,9 +417,10 @@ function renderSettings(cfg, s) {
   // The real stored value either way -- greyed while tucking, never overwritten.
   if (cfg && typeof cfg.decoys === "boolean") $("decoyToggle").checked = cfg.decoys;
 
-  // The tuck toggle and its folder name are both preferences that take effect on
-  // the NEXT hide, never the current one -- a live hide is put back by whatever
-  // the journal recorded, not by these -- so both stay editable while hidden.
+  // Both of these now take effect immediately, hidden or not: the engine applies
+  // a change to the hide that is already running (see "Live settings" there), so
+  // they stay editable while hidden for the reason they always did -- and mean
+  // something while hidden, which they did not.
   if (cfg && typeof cfg.tuckMode === "boolean") $("tuckToggle").checked = cfg.tuckMode;
   $("tuckToggle").disabled = false;
   applyDecoyAvailability(!!cfg?.tuckMode);
@@ -437,34 +438,112 @@ function renderSettings(cfg, s) {
   $("settingsLocked").hidden = !hidden;
 }
 
+/**
+ * What a settings change did to the hide that was already running, in one line.
+ *
+ * The switches are silent when nothing is hidden -- there is nothing to report,
+ * the preference simply waits for the next hide -- and the engine says so by
+ * sending no `live` block at all. When it does send one, it is describing work
+ * done to bookmarks that are on screen right now, which is worth a sentence.
+ */
+function noteLive(live) {
+  const note = $("liveNote");
+  const say = (text, tone = "ok") => {
+    note.textContent = text;
+    note.dataset.tone = tone;
+    note.hidden = false;
+  };
+
+  if (!live) {
+    note.hidden = true;
+    return;
+  }
+  if (live.reason === "exposed") {
+    say(
+      "Some bookmarks are back on your bar, so nothing was moved. Hide again to apply this.",
+      "warn",
+    );
+    return;
+  }
+  if (live.error || live.converted === false) {
+    say("Couldn't change the current hide. This applies from your next hide.", "warn");
+    return;
+  }
+  if (live.switched === "tuck") {
+    say(`Done — your hidden bookmarks are now tucked into “${live.name}”.`);
+    return;
+  }
+  if (live.switched === "vault") {
+    say("Done — the folder is off your bar and your bookmarks are parked away again.");
+    return;
+  }
+  if (live.renamed) {
+    say(`Renamed the folder on your bar to “${live.name}”.`);
+    return;
+  }
+  if (live.changed) {
+    say(
+      live.decoys > 0
+        ? "Placeholder links are on your bar now."
+        : "Placeholder links taken off your bar.",
+    );
+    return;
+  }
+  note.hidden = true;
+}
+
 // Lazy: the first open loads the real state; later opens are left as the user
 // last saw them, and any action re-renders from the worker's reply anyway.
 $("settings").ontoggle = (e) => {
   if (e.currentTarget.open && !settingsLoaded) loadSettingsPanel();
 };
 
-$("decoyToggle").onchange = async (e) => {
-  const decoys = !!e.currentTarget.checked;
-  await send("setSettings", { patch: { decoys } }).catch(() => {});
-};
+/**
+ * Save a setting, then re-render the panel from what the worker actually did.
+ *
+ * A change here is no longer only a preference: while the bar is hidden the
+ * engine applies it to the live hide, which for the tuck switch means moving
+ * every bookmark from one hiding place to the other. So the switches lock for
+ * the round trip -- two conversions racing each other on one journal is the one
+ * thing the popup can cause and the engine should not have to defend against --
+ * and the panel is rendered from the reply rather than from what was clicked.
+ *
+ * `lock` is off for the folder-name field: it saves as you type, and disabling
+ * an input takes the caret with it.
+ */
+async function saveSetting(patch, { lock = true } = {}) {
+  const locked = lock ? [$("decoyToggle"), $("tuckToggle")] : [];
+  for (const el of locked) el.disabled = true;
+  let cfg = null;
+  try {
+    cfg = await send("setSettings", { patch });
+  } catch { /* the render below puts the panel back to what the worker knows */ }
+  for (const el of locked) el.disabled = false;
+  const s = await refresh();
+  if (cfg) renderSettings(cfg, s);
+  noteLive(cfg?.live);
+  return cfg;
+}
 
-// The tuck toggle just arms the mode; nothing moves until the next hide, so this
-// only writes the preference -- and greys the placeholder-links control, which
-// does not apply while tucking, live before the round trip.
-$("tuckToggle").onchange = async (e) => {
+$("decoyToggle").onchange = (e) => saveSetting({ decoys: !!e.currentTarget.checked });
+
+// Greys the placeholder-links control, which does not apply while tucking, live
+// before the round trip -- the switch itself may take a moment when it is
+// converting a hide that is already running.
+$("tuckToggle").onchange = (e) => {
   const tuckMode = !!e.currentTarget.checked;
   applyDecoyAvailability(tuckMode);
-  await send("setSettings", { patch: { tuckMode } }).catch(() => {});
+  return saveSetting({ tuckMode });
 };
 
 // The folder name has no submit -- whatever is in the box is what the next tuck
-// uses -- so it is saved as the user types (debounced), and again on blur to
-// catch the final keystroke. An empty box is ignored by the worker, which keeps
-// the last good name.
+// uses, and what a live one is renamed to -- so it is saved as the user types
+// (debounced), and again on blur to catch the final keystroke. An empty box is
+// ignored by the worker, which keeps the last good name.
 let tuckNameTimer = null;
 function saveTuckName() {
   clearTimeout(tuckNameTimer);
-  return send("setSettings", { patch: { tuckName: $("tuckName").value } }).catch(() => {});
+  return saveSetting({ tuckName: $("tuckName").value }, { lock: false });
 }
 $("tuckName").oninput = () => {
   clearTimeout(tuckNameTimer);

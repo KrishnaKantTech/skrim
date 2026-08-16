@@ -64,7 +64,7 @@ export const FIXTURES = {
   // that catches a naive frames.length.
   shielded: {
     status: {
-      hidden: true, state: "hidden", since: now - 4 * 60000, dirty: false,
+      hidden: true, state: "hidden", mode: "vault", since: now - 4 * 60000, dirty: false,
       itemsDisplaced: 12, ownedVaults: 1, pendingAdoption: [], skippedBars: 0,
       // 6 == engine.js DECOYS.length, which is what a clean hide leaves on the
       // bar. This is the state the store screenshot renders, and the mock bar
@@ -84,7 +84,7 @@ export const FIXTURES = {
   // the hours branch, and dirty so the reorder warning shows.
   manual: {
     status: {
-      hidden: true, state: "hidden", since: now - 96 * 60000, dirty: true,
+      hidden: true, state: "hidden", mode: "vault", since: now - 96 * 60000, dirty: true,
       itemsDisplaced: 12, ownedVaults: 1, pendingAdoption: [], skippedBars: 0,
       bars: [bar(0)],
     },
@@ -114,7 +114,7 @@ export const FIXTURES = {
   },
   busy: {
     status: {
-      hidden: true, state: "hiding", since: now, dirty: false, itemsDisplaced: 12,
+      hidden: true, state: "hiding", mode: "vault", since: now, dirty: false, itemsDisplaced: 12,
       ownedVaults: 1, pendingAdoption: [], skippedBars: 0, bars: [bar(9)],
     },
     shares: { sharing: 1, frames: [{ frame: "42:0", sessions: 1, quietMs: 200 }] },
@@ -140,6 +140,15 @@ export const FIXTURES = {
   },
 };
 
+// The settings panel's starting point, for every state. Without it the panel
+// renders at its markup defaults and the switches answer `{ ok: true }`, which
+// is a reply the worker never sends. Where it goes from there is up to the stub
+// below, which applies each patch: the switches now change a hide that is
+// already running, and that is a sequence, not a state -- flip one on a hidden
+// fixture and the panel answers exactly as the real one does.
+const SETTINGS = { decoys: true, tuckMode: false, tuckName: "Bookmarks" };
+for (const f of Object.values(FIXTURES)) f.getSettings = { ...SETTINGS };
+
 // The same state a few seconds in, which is the moment tools/make-promo-video.mjs
 // depicts: the share has just started and the bar has just cleared. `shielded`
 // says "Hidden for 4 mins", and four minutes two seconds after the viewer
@@ -154,10 +163,47 @@ FIXTURES.justHidden = {
 
 const stub = (name) => `<script>
   const F = ${JSON.stringify(FIXTURES)}[${JSON.stringify(name)}] ?? {};
+
+  // The settings panel is the one part of the popup that WRITES, and since the
+  // switches began changing a hide that is already running, a stub that replays
+  // one canned answer would preview a panel that contradicts itself -- a switch
+  // that snaps back under a note saying it worked. So this models the round
+  // trip: the patch is applied, and a hidden fixture answers with the live
+  // block the engine would send for that particular change. (No backticks in
+  // here either -- the whole stub is a template literal.)
+  const S = { ...(F.getSettings ?? {}) };
+  // Which mechanism the live hide is using, because a switch now changes it --
+  // and two of the panel's lines are written from the status reply, not from
+  // the settings, so a status that never moved would argue with the note.
+  let mode = F.status && F.status.hidden ? F.status.mode ?? "vault" : null;
+  const setSettings = (patch = {}) => {
+    Object.assign(S, patch);
+    if (mode && typeof patch.tuckMode === "boolean") mode = patch.tuckMode ? "tuck" : "vault";
+    if (typeof S.tuckName === "string") S.tuckName = S.tuckName.trim().slice(0, 60) || "Bookmarks";
+    let live = null;
+    if (F.status && F.status.hidden) {
+      if (typeof patch.tuckMode === "boolean") {
+        live = patch.tuckMode
+          ? { switched: "tuck", converted: true, mode: "tuck", moved: F.status.itemsDisplaced, stuck: [], name: S.tuckName }
+          : { switched: "vault", converted: true, mode: "vault", moved: F.status.itemsDisplaced, stuck: [], decoys: S.decoys ? 6 : 0 };
+      } else if (typeof patch.decoys === "boolean" && !S.tuckMode) {
+        live = { changed: true, decoys: patch.decoys ? 6 : 0, removed: patch.decoys ? 0 : 6 };
+      } else if (typeof patch.tuckName === "string" && S.tuckMode) {
+        live = { renamed: true, name: S.tuckName };
+      }
+    }
+    return live ? { ...S, live } : { ...S };
+  };
+
   window.chrome = {
     runtime: {
       sendMessage: (m) =>
-        new Promise((r) => setTimeout(() => r(F[m.type] ?? { ok: true }), 30)),
+        new Promise((r) => setTimeout(() => {
+          r(m.type === "setSettings" ? setSettings(m.patch)
+            : m.type === "getSettings" ? { ...S }
+            : m.type === "status" && F.status ? { ...F.status, mode }
+            : F[m.type] ?? { ok: true });
+        }, 30)),
       getURL: (p) => "chrome-extension://preview/" + p,
       // No update_url == not a Web Store install, which is what unlocks the
       // developer disclosure. This harness IS the developer case, and without

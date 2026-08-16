@@ -50,8 +50,10 @@ extension user — only someone who typed their address into a form on the websi
 node tools/test-engine.mjs         # ~1s, prints a scoreboard, exit 0 = all green
 node tools/mutate-m2.mjs           # proves those tests would catch a regression
 node tools/mutate-recovery.mjs     # same, for the crash-recovery layer
+node tools/mutate-live.mjs         # same, for the settings that change a LIVE hide
 node tools/live-test.mjs           # ~75s, drives a real Chrome
 node tools/store-install-test.mjs  # ~60s, a fresh profile and a store-shaped copy
+node tools/qa-features.mjs         # ~40s, clicks the real toggles in a real Chrome
 ```
 
 Every item Skrim deletes is an item Skrim itself created.
@@ -71,6 +73,15 @@ When a screen share starts:
    take their place — a conspicuously empty bar is its own tell.
 3. When the share ends, every bookmark returns to the exact index it came from,
    and the folder, the placeholders and the receipt are deleted.
+
+Both of those are switches, and both take effect **while the bar is already
+hidden** — the moment you actually reach for them is mid-call. Turning
+placeholder links on or off changes the hidden bar there and then; switching
+"Tuck the bar into a folder" converts the hide that is running, moving your
+bookmarks straight from the folder in Other Bookmarks into one plainly-named
+folder that stays on the bar, or back. Nothing is ever staged on the bar to get
+there, so the share never sees a bookmark mid-switch, and an interruption at any
+point leaves everything one restore from home.
 
 Skrim sees the share start by wrapping `navigator.mediaDevices.getDisplayMedia`
 in the MAIN world at `document_start`. It observes exactly three facts: that a

@@ -860,6 +860,25 @@ body {
   color: var(--attention);
 }
 
+/* Confirmation that a switch just changed a hide that is already running. Green
+ * because it is a thing that worked, and the amber tone is spoken for above by
+ * the state that needs the user -- see the note's `warn` case, which is the one
+ * time this says something did NOT happen.
+ *
+ * Negative top margin against the row above: it belongs to the switches, not to
+ * the section that follows, and the panel's row gap would otherwise leave it
+ * floating exactly between the two. */
+.settings__live {
+  margin: -6px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--accent-text);
+}
+
+.settings__live[data-tone="warn"] {
+  color: var(--attention);
+}
+
 /* ------------------------------------------------------------- developer */
 
 .dev {

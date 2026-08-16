@@ -206,6 +206,23 @@ async function safeRemoveTree(id) {
   }
 }
 
+/**
+ * Retitle a node of OURS -- a receipt whose contents changed under it, or a tuck
+ * folder the user renamed mid-share. Deliberately NOT self-attributed: an update
+ * emits only onChanged, which is deliberately not wired to markDirty (a rename
+ * moves nothing, so it cannot stale an index). Noting a mutation nobody will
+ * ever claim would leave a stale entry for a LATER real event on the same id to
+ * consume, and quietly excuse a move the user made.
+ */
+async function bmUpdate(id, props) {
+  try {
+    await chrome.bookmarks.update(id, props);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function ownedVaults() {
   const got = await chrome.storage.local.get(OWNED_VAULTS_KEY);
   return got[OWNED_VAULTS_KEY] ?? [];
@@ -531,6 +548,88 @@ async function stillHidden(j) {
 }
 
 // ---------------------------------------------------------------------------
+// The two things a vault hide leaves behind besides the vault itself: the
+// placeholders on the bar, and the receipt inside the vault that explains them.
+// Both are built here rather than inline, because the live settings below have
+// to be able to add and rewrite them long after the hide that made them ran.
+
+/**
+ * Drop the placeholder set onto one bar, journalling as it goes.
+ *
+ * `decoyNext` is the loop INDEX, journalled after each iteration -- NOT a count
+ * of successes. They diverge the moment one create throws, and a count then
+ * points the crash sweep at the wrong decoy spec, stranding a fake bookmark on
+ * the bar forever. With the index, a crash between create() returning and the
+ * write leaves decoyNext pointing at exactly the decoy that was created but
+ * never journalled, whatever failed before it.
+ *
+ * Returns the (id, title, url) of each one that actually got created, which is
+ * what the receipt needs and the journal deliberately does not keep: pairing
+ * them by position in decoyIds would be wrong the moment one create throws and
+ * the two lists shear.
+ */
+async function createDecoys(j, entry) {
+  // A tuck hide journals no decoy fields at all -- it has never had any -- and
+  // switching one to vault mode mid-share is how an entry without them gets
+  // here. Seeded before the write, so the journal that goes to disk describes
+  // the phase that is about to run rather than half of it.
+  entry.decoyIds = entry.decoyIds ?? [];
+  entry.decoyPhase = true;
+  entry.decoyNext = 0;
+  await journal.write(j);
+  const made = [];
+  for (let i = 0; i < DECOYS.length; i++) {
+    let created = null;
+    try {
+      created = await bmCreate({
+        parentId: entry.barId,
+        title: DECOYS[i].title,
+        url: DECOYS[i].url,
+      });
+    } catch { /* decoys are cosmetic; never fail a hide over them */ }
+    if (created) {
+      entry.decoyIds.push(created.id);
+      made.push({ id: created.id, ...DECOYS[i] });
+    }
+    entry.decoyNext = i + 1;
+    await journal.write(j);
+  }
+  return made;
+}
+
+/**
+ * Write the vault's receipt, or bring the one already there up to date.
+ *
+ * Updating in place matters for the live settings: a receipt names the
+ * placeholders it is standing next to, and one that still names six bookmarks
+ * the user has just switched off would tell a stranded reader to go and delete
+ * bookmarks of their own. A recovery aid must never be the reason anything
+ * fails, so every path here reports rather than throws.
+ */
+async function syncReceipt(j, entry, decoys = []) {
+  if (!entry.vaultId) return false;
+  try {
+    const title = receipt.buildTitle({ items: entry.items.length, decoys });
+    const url = receipt.buildUrl(
+      receipt.buildPayload({
+        barId: entry.barId,
+        otherId: entry.otherId,
+        vaultId: entry.vaultId,
+        items: entry.items,
+        decoys,
+      })
+    );
+    if (entry.receiptId && (await bmUpdate(entry.receiptId, { title, url }))) return true;
+    const node = await bmCreate({ parentId: entry.vaultId, index: 0, title, url });
+    entry.receiptId = node.id;
+    await journal.write(j);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 async function hideImpl({ decoys } = {}) {
   const existing = await journal.read();
@@ -622,15 +721,7 @@ async function hideImpl({ decoys } = {}) {
     return { ok: false, error: "partial hide, rolled back", failures, rollback };
   }
 
-  // Decoys. `decoyNext` is the loop INDEX, journalled after each iteration --
-  // NOT a count of successes. They diverge the moment one create throws, and a
-  // count then points the crash sweep at the wrong decoy spec, stranding a fake
-  // bookmark on the bar forever. With the index, a crash between create()
-  // returning and the write leaves decoyNext pointing at exactly the decoy that
-  // was created but never journalled, whatever failed before it.
-  // Kept out of the journal: only the receipt needs the (title, url) of each
-  // decoy that actually got created, and pairing them by position in decoyIds
-  // would be wrong the moment one create throws and the two lists shear.
+  // Decoys. See createDecoys for why the journalling looks the way it does.
   const decoysMade = new Map(); // entry -> [{ id, title, url }]
 
   // The caller can force decoys on or off (the developer buttons, the tests,
@@ -642,26 +733,7 @@ async function hideImpl({ decoys } = {}) {
 
   if (wantDecoys) {
     const entry = entries[0]; // one set is enough; the bar renders storages merged
-    entry.decoyPhase = true;
-    await journal.write(j);
-    const made = [];
-    decoysMade.set(entry, made);
-    for (let i = 0; i < DECOYS.length; i++) {
-      let created = null;
-      try {
-        created = await bmCreate({
-          parentId: entry.barId,
-          title: DECOYS[i].title,
-          url: DECOYS[i].url,
-        });
-      } catch { /* decoys are cosmetic; never fail a hide over them */ }
-      if (created) {
-        entry.decoyIds.push(created.id);
-        made.push({ id: created.id, ...DECOYS[i] });
-      }
-      entry.decoyNext = i + 1;
-      await journal.write(j);
-    }
+    decoysMade.set(entry, await createDecoys(j, entry));
   }
 
   // The receipt. Written LAST, deliberately: by here the bar is already clear,
@@ -672,25 +744,7 @@ async function hideImpl({ decoys } = {}) {
   // extension is still installed for, and the receipt only ever has to answer
   // the one it is not.
   for (const entry of entries) {
-    const made = decoysMade.get(entry) ?? [];
-    try {
-      const node = await bmCreate({
-        parentId: entry.vaultId,
-        index: 0,
-        title: receipt.buildTitle({ items: entry.items.length, decoys: made }),
-        url: receipt.buildUrl(
-          receipt.buildPayload({
-            barId: entry.barId,
-            otherId: entry.otherId,
-            vaultId: entry.vaultId,
-            items: entry.items,
-            decoys: made,
-          })
-        ),
-      });
-      entry.receiptId = node.id;
-      await journal.write(j);
-    } catch { /* a recovery aid must never be the reason a hide fails */ }
+    await syncReceipt(j, entry, decoysMade.get(entry) ?? []);
   }
 
   // Verify: no real bookmark may remain visible on any bar.
@@ -737,25 +791,16 @@ async function findLeaks(entries) {
 }
 
 // ---------------------------------------------------------------------------
+// Placeholder teardown, shared by every path that ends or edits a hide.
+//
+// Lifted out of restoreImpl unchanged, because the live settings below need the
+// exact same care for a reason restore does not have: a user turning the
+// placeholders OFF mid-share is asking for six bookmarks to come off a bar that
+// is on screen right now, and getting that wrong in either direction -- leaving
+// one behind, or deleting a real bookmark whose id sync has reused -- is the
+// same failure it has always been.
 
-async function restoreImpl({ internal = false } = {}) {
-  const j = await journal.read();
-  if (!journal.isDisplaced(j)) {
-    dirtySuppressed = true;
-    return { ok: true, alreadyRestored: true, ...(await housekeeping()) };
-  }
-
-  // A tuck hide is put back by a different, simpler path: its items sit in a
-  // folder on the bar, not a vault, and no decoys, receipts or owned vaults are
-  // in play. Branch before any of that machinery runs. recover() reaches restore
-  // through here too, so an interrupted tuck is repaired by the same code.
-  if (j.mode === "tuck") return tuckRestoreImpl(j, { internal });
-
-  if (!internal) await journal.setState(journal.State.RESTORING);
-
-  // Decoys first, so real items land on a bar that is as close to empty as
-  // possible. Identity is re-verified: an id remapped by sync must never take
-  // a real bookmark with it.
+async function clearJournalledDecoys(j) {
   for (const entry of j.groups) {
     // Removed one at a time and persisted after each, mirroring the write-ahead
     // ordering used to create them. A fault mid-loop then leaves the journal
@@ -812,6 +857,73 @@ async function restoreImpl({ internal = false } = {}) {
       await journal.write(j);
     }
   }
+}
+
+/**
+ * Take our tuck folders off the bar, once they are empty.
+ *
+ * Called by BOTH restore paths, not just the tuck one. A hide that was switched
+ * from the vault to a folder mid-share and then interrupted leaves a journal
+ * saying "vault" and a folder on the bar; whichever path runs has to be able to
+ * finish the job, or the user is left with an empty folder they did not make.
+ * A folder still holding a stuck item is kept, along with the journal, so the
+ * watchdog can retry.
+ */
+async function dropTuckFolders(j) {
+  // The ids actually removed, for the one caller that has to edit the journal
+  // afterwards. Reported rather than re-derived: "is it gone?" answered by a
+  // read that failed reads exactly like "yes", and clearing a folderId on a
+  // transient failure would strand the folder on the bar with no record of it.
+  const removed = new Set();
+
+  for (const entry of j.groups ?? []) {
+    if (!entry.folderId) continue;
+    const left = await childrenOrNull(entry.folderId);
+    if (left !== null && left.length === 0 && (await safeRemoveTree(entry.folderId))) {
+      removed.add(entry.folderId);
+    }
+  }
+
+  // Orphan sweep. A crash between creating a folder and journalling its id
+  // leaves an EMPTY folder on the bar the id-based delete above cannot see.
+  // Bounded exactly like the decoy sweep -- our title, empty, and newer than
+  // this hide began -- so it can never take a folder the user made themselves.
+  if (!j.folderTitle) return removed;
+  for (const barId of new Set((j.groups ?? []).map((e) => e.barId))) {
+    const kids = await childrenOrNull(barId);
+    for (const k of kids ?? []) {
+      if (k.url !== undefined || k.title !== j.folderTitle) continue;
+      if (typeof k.dateAdded === "number" && k.dateAdded < (j.startedAt ?? 0)) continue;
+      const inside = await childrenOrNull(k.id);
+      if (inside !== null && inside.length === 0 && (await safeRemoveTree(k.id))) {
+        removed.add(k.id);
+      }
+    }
+  }
+  return removed;
+}
+
+// ---------------------------------------------------------------------------
+
+async function restoreImpl({ internal = false } = {}) {
+  const j = await journal.read();
+  if (!journal.isDisplaced(j)) {
+    dirtySuppressed = true;
+    return { ok: true, alreadyRestored: true, ...(await housekeeping()) };
+  }
+
+  // A tuck hide is put back by a different, simpler path: its items sit in a
+  // folder on the bar, not a vault, and no decoys, receipts or owned vaults are
+  // in play. Branch before any of that machinery runs. recover() reaches restore
+  // through here too, so an interrupted tuck is repaired by the same code.
+  if (j.mode === "tuck") return tuckRestoreImpl(j, { internal });
+
+  if (!internal) await journal.setState(journal.State.RESTORING);
+
+  // Decoys first, so real items land on a bar that is as close to empty as
+  // possible. Identity is re-verified: an id remapped by sync must never take
+  // a real bookmark with it.
+  await clearJournalledDecoys(j);
 
   let restored = 0;
   const missing = [];
@@ -867,10 +979,16 @@ async function restoreImpl({ internal = false } = {}) {
   // holds nothing but the receipt, which is discarded with it. A vault still
   // holding a real item keeps both.
   for (const entry of j.groups) {
+    if (!entry.vaultId) continue;
     if (await emptyVault(entry.vaultId)) {
       if (await safeRemoveTree(entry.vaultId)) await dropOwnedVault(entry.vaultId);
     }
   }
+
+  // And any folder a half-finished switch to tuck mode left on the bar. A
+  // classic vault hide journals neither a folderId nor a folderTitle, so this
+  // is a no-op for every hide that was never converted.
+  await dropTuckFolders(j);
 
   // Drain the stray list before judging the outcome, so `decoysStuck` reports
   // what is actually still on the bar rather than what failed one attempt ago.
@@ -1170,12 +1288,29 @@ export const status = () =>
   });
 
 // ---------------------------------------------------------------------------
-// Settings passthrough. The engine is the one place that already runs every
-// bookmark operation on a single chain, so a setting the popup writes and the
-// engine reads a millisecond later on the next hide cannot interleave.
+// Settings. The engine is the one place that already runs every bookmark
+// operation on a single chain, so a setting the popup writes and the engine
+// reads a millisecond later on the next hide cannot interleave -- and a setting
+// that has to act on the hide already running (see "Live settings" below) is on
+// that same chain as everything it edits.
 
 export const getSettings = () => settings.read();
-export const setSettings = (patch) => settings.write(patch);
+
+export const setSettings = (patch) =>
+  serialize(async () => {
+    const saved = await settings.write(patch);
+    let live = null;
+    try {
+      live = await retuneLive(patch, saved);
+    } catch (err) {
+      // Reported, never thrown. The preference is already stored, and every
+      // step of a conversion leaves the bookmarks one restore from home, so the
+      // worst case here is a hide that is still whole in one mode or the other
+      // -- which must not come back to the popup as a dead toggle.
+      live = { error: String(err?.message ?? err) };
+    }
+    return live ? { ...saved, live } : saved;
+  });
 
 // ---------------------------------------------------------------------------
 // Tuck hide.
@@ -1324,6 +1459,12 @@ async function tuckHideImpl(name) {
 async function tuckRestoreImpl(j, { internal = false } = {}) {
   if (!internal) await journal.setState(journal.State.RESTORING);
 
+  // A tuck hide creates no placeholders, so this is normally nothing at all.
+  // It is not nothing after a switch from vault mode that was interrupted
+  // between flipping the journal and clearing the bar: the ids are journalled,
+  // and this is now the path that has to honour them.
+  await clearJournalledDecoys(j);
+
   let restored = 0;
   const missing = [];
   const stuck = [];
@@ -1371,33 +1512,32 @@ async function tuckRestoreImpl(j, { internal = false } = {}) {
     }
   }
 
-  // Delete each now-empty tuck folder. A folder still holding a stuck item is
-  // kept, along with the journal, so the watchdog can retry.
-  for (const entry of j.groups) {
-    if (!entry.folderId) continue;
-    const left = await childrenOrNull(entry.folderId);
-    if (left !== null && left.length === 0) await safeRemoveTree(entry.folderId);
-  }
+  // Delete each now-empty tuck folder, and sweep any our own crash orphaned.
+  await dropTuckFolders(j);
 
-  // Orphan sweep. A crash between creating a folder and journalling its id
-  // leaves an EMPTY folder on the bar the id-based delete above cannot see.
-  // Bounded exactly like the decoy sweep -- our title, empty, and newer than
-  // this hide began -- so it can never take a folder the user made themselves.
-  if (j.folderTitle) {
-    for (const barId of new Set(j.groups.map((e) => e.barId))) {
-      const kids = await childrenOrNull(barId);
-      for (const k of kids ?? []) {
-        if (k.url !== undefined || k.title !== j.folderTitle) continue;
-        if (typeof k.dateAdded === "number" && k.dateAdded < (j.startedAt ?? 0)) continue;
-        const inside = await childrenOrNull(k.id);
-        if (inside !== null && inside.length === 0) await safeRemoveTree(k.id);
-      }
+  // A vault left over from a switch INTO tuck mode: the items are back on the
+  // bar by now, so all it can still hold is our own receipt. Same rule as the
+  // vault path -- only ever delete one we can confirm is empty. Whatever this
+  // misses, the orphan sweep in housekeeping below drains, because a converted
+  // vault is one we own.
+  for (const entry of j.groups) {
+    if (!entry.vaultId) continue;
+    if (await emptyVault(entry.vaultId)) {
+      if (await safeRemoveTree(entry.vaultId)) await dropOwnedVault(entry.vaultId);
     }
   }
 
   const totalItems = j.groups.reduce((n, e) => n + e.items.length, 0);
   const totalLoss = totalItems > 0 && restored === 0 && missing.length === totalItems;
   const ok = stuck.length === 0 && mismatches.length === 0 && !totalLoss;
+
+  // Whatever the decoy clear at the top could not remove. Used to be hardcoded
+  // to none, which was true for as long as a tuck hide could not have any --
+  // it can, since a switch out of vault mode can be interrupted with the
+  // placeholders still journalled. Read off the journal the clear has already
+  // pruned, rather than by re-walking the tree: the ids left in it ARE the ones
+  // still on the bar, and they are on the stray list too, which outlives this.
+  const decoysStuck = j.groups.flatMap((e) => e.decoyIds ?? []);
 
   let gaveUp = false;
   if (ok) {
@@ -1414,7 +1554,7 @@ async function tuckRestoreImpl(j, { internal = false } = {}) {
           restored,
           missing: missing.map((m) => m.id),
           stuck: stuck.map((m) => m.id),
-          decoysStuck: [],
+          decoysStuck,
           mismatches: mismatches.length,
         },
       });
@@ -1427,7 +1567,280 @@ async function tuckRestoreImpl(j, { internal = false } = {}) {
   }
 
   dirtySuppressed = true; // no live hide either way, so nothing to mark
-  return { ok, gaveUp, attempts: j.attempts ?? 0, restored, missing, stuck, decoysStuck: 0, mismatches, ...(await housekeeping()) };
+  return {
+    ok, gaveUp, attempts: j.attempts ?? 0, restored, missing, stuck,
+    decoysStuck: decoysStuck.length, mismatches, ...(await housekeeping()),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Live settings.
+//
+// Both switches in the panel used to describe the NEXT hide. That is the wrong
+// tense for the moment a user actually reaches for them: the bar is already
+// down, the call is already running, and "actually, leave a few placeholders" or
+// "actually, use a folder so my other laptop keeps its bookmarks" could only be
+// answered by putting the whole bar back on a live screen share and hiding it
+// again. So a change made while hidden is applied to the hide that is running.
+//
+// Three rules make that safe, and they are the same three the hide paths follow:
+//
+//  * `entry.items` -- the ids, and the bar indices they came from -- is never
+//    edited by any of this. Both restore paths move those ids back to the bar
+//    from WHEREVER they are, so at every await in a conversion, in either
+//    direction, the user's bookmarks are one restore away from home.
+//  * The journal is written before the mutation it describes, and `mode` flips
+//    only once the container it names exists. Whichever mode a crash leaves
+//    behind, that path now cleans up both containers -- see dropTuckFolders and
+//    the vault sweep in tuckRestoreImpl.
+//  * Nothing is ever staged on the bar. Items go vault -> folder and folder ->
+//    vault directly, because the bar is the one place the share can see. A
+//    conversion that fails halfway leaves every item in one hiding place or the
+//    other, never on screen, which is why none of these paths roll back.
+
+/** The hide a settings change can still edit, or null. */
+async function liveHide() {
+  const j = await journal.read();
+  if (!journal.isDisplaced(j)) return null;
+  // HIDING and RESTORING mean the tree is mid-rewrite and the journal is a plan
+  // rather than a description of it. Editing that would be editing a moving
+  // target; the preference is stored either way and the next hide honours it.
+  if (j.state !== journal.State.HIDDEN) return null;
+  return j;
+}
+
+const decoyCount = (j) =>
+  (j.groups ?? []).reduce((n, e) => n + (e.decoyIds ?? []).length, 0);
+
+/**
+ * Put the placeholders on the bar, or take them off, mid-hide. Vault mode only:
+ * a tuck hide's cover is the folder, and the popup greys the switch to say so.
+ *
+ * Driven off what the journal says is actually THERE rather than off the
+ * previous preference, so it is also the repair for a hide whose placeholders
+ * a crash left half-made: switching off and on again rebuilds the set.
+ */
+async function setDecoysLive(j, want) {
+  const had = decoyCount(j);
+
+  if (want) {
+    if (had > 0) return { decoys: had, changed: false };
+    const entry = j.groups[0];
+    if (!entry) return { decoys: 0, changed: false };
+    const made = await createDecoys(j, entry);
+    await syncReceipt(j, entry, made);
+    return { decoys: made.length, changed: made.length > 0 };
+  }
+
+  if (had === 0) return { decoys: 0, changed: false };
+  // Which entries carried them, before the clear empties the lists: only those
+  // receipts are describing something that has just stopped being true.
+  const carried = new Set(j.groups.filter((e) => (e.decoyIds ?? []).length > 0));
+  await clearJournalledDecoys(j);
+  for (const entry of j.groups) if (carried.has(entry)) await syncReceipt(j, entry, []);
+  const left = decoyCount(j);
+  return { decoys: left, removed: had - left, changed: true };
+}
+
+/**
+ * Vault hide -> tuck hide, in place.
+ *
+ * The items go straight from the vault into a folder on the bar. Nothing
+ * touches the bar loose, and the moment the mode flips it is the tuck path that
+ * owns the cleanup -- including the vault we are emptying, which it now knows
+ * how to drop.
+ */
+async function toTuckLive(j, name) {
+  // Only edit a hide that is still true of the tree. Bookmarks already back on
+  // the bar are not a hide to convert, they are a hide to repair -- which is
+  // restore's job, and the next hide's reconcile.
+  if (!(await stillHidden(j))) return { converted: false, reason: "exposed" };
+
+  const folderTitle = String(name ?? "").trim().slice(0, 60) || settings.DEFAULTS.tuckName;
+
+  // The placeholders come off first, while the journal still says "vault" and
+  // that path still owns them. In tuck mode the folder IS the cover, and six
+  // look-alike links sitting beside it would be the tell the mode avoids.
+  await clearJournalledDecoys(j);
+
+  // Write-ahead: the name is journalled before any folder carries it, so a
+  // crash between create() and its write is still cleaned up by title.
+  j.folderTitle = folderTitle;
+  await journal.write(j);
+
+  for (const entry of j.groups) {
+    if (entry.folderId) continue; // already there: an interrupted switch, resumed
+    let folder;
+    try {
+      folder = await bmCreate({ parentId: entry.barId, title: folderTitle });
+    } catch (err) {
+      // Nothing has left the vault yet, so this is still exactly the hide it
+      // was a moment ago, minus placeholders the preference no longer wants.
+      return { converted: false, error: String(err?.message ?? err) };
+    }
+    entry.folderId = folder.id;
+    await journal.write(j);
+  }
+
+  j.mode = "tuck";
+  await journal.write(j);
+
+  let moved = 0;
+  const stuck = [];
+  for (const entry of j.groups) {
+    for (const item of entry.items) {
+      // Appending, never by index: order inside the folder is the journal's to
+      // replay on the way out, and an out-of-range index is the one thing
+      // move() rejects outright.
+      try {
+        await bmMove(item.id, { parentId: entry.folderId });
+        moved++;
+      } catch {
+        if (await nodeExists(item.id)) stuck.push(item.id);
+      }
+    }
+  }
+
+  // The vault has nothing left to hold, and its receipt goes with it: a folder
+  // sitting in plain sight on the bar needs no map, which is the other half of
+  // why this mode survives an uninstall better than the vault does.
+  for (const entry of j.groups) {
+    if (!entry.vaultId) continue;
+    if (!(await emptyVault(entry.vaultId))) continue;
+    if (!(await safeRemoveTree(entry.vaultId))) continue;
+    await dropOwnedVault(entry.vaultId);
+    entry.vaultId = null;
+    entry.receiptId = null;
+    await journal.write(j);
+  }
+
+  return { converted: true, mode: "tuck", moved, stuck, name: folderTitle };
+}
+
+/**
+ * Tuck hide -> vault hide, in place. The mirror of the above: a vault in the
+ * matching Other Bookmarks, the folder's contents moved into it, the folder
+ * taken off the bar, and then the two things a vault hide owes the user -- the
+ * placeholders, if they want them, and a receipt that outlives an uninstall.
+ */
+async function toVaultLive(j, wantDecoys) {
+  if (!(await stillTucked(j))) return { converted: false, reason: "exposed" };
+
+  // Every group needs the Other Bookmarks in its OWN storage: routing an
+  // account bookmark into a local vault would silently flip its sync status,
+  // which is the whole reason roots are grouped. Resolved for all of them
+  // before anything moves, so a bar we cannot pair leaves the tuck untouched
+  // instead of half-converted.
+  const { groups } = await getGroups().catch(() => ({ groups: [] }));
+  for (const entry of j.groups) {
+    if (entry.vaultId) continue;
+    const home = groups.find((g) => g.bar.id === entry.barId);
+    if (!home) return { converted: false, error: "no vault home for this bar" };
+    entry.otherId = home.other.id;
+  }
+
+  for (const entry of j.groups) {
+    if (entry.vaultId) continue;
+    let vault;
+    try {
+      vault = await bmCreate({ parentId: entry.otherId, title: VAULT_TITLE });
+    } catch (err) {
+      return { converted: false, error: String(err?.message ?? err) };
+    }
+    // Journalled BEFORE it is registered as ours, because those are the two
+    // records that can rescue it and the journal is the cheaper one to write.
+    // Either alone is enough -- the journal by id, through the restore paths;
+    // the registry by ownership, through the orphan sweep -- so this leaves a
+    // single call in which a crash could strand an empty folder, rather than
+    // three.
+    entry.vaultId = vault.id;
+    await journal.write(j);
+    await addOwnedVault(vault.id);
+  }
+
+  j.mode = "vault";
+  await journal.write(j);
+
+  let moved = 0;
+  const stuck = [];
+  for (const entry of j.groups) {
+    for (const item of entry.items) {
+      try {
+        await bmMove(item.id, { parentId: entry.vaultId });
+        moved++;
+      } catch {
+        if (await nodeExists(item.id)) stuck.push(item.id);
+      }
+    }
+  }
+
+  // The folder comes off the bar once it is empty -- and its name comes out of
+  // the journal with it, so a later restore's title sweep cannot reach a folder
+  // the user has since made under the same name. A folder still holding a stuck
+  // item keeps both, and the items in it are journalled either way.
+  const removed = await dropTuckFolders(j);
+  for (const entry of j.groups) {
+    if (entry.folderId && removed.has(entry.folderId)) entry.folderId = null;
+  }
+  if (j.groups.every((e) => !e.folderId)) delete j.folderTitle;
+  await journal.write(j);
+
+  const made = wantDecoys && j.groups[0] ? await createDecoys(j, j.groups[0]) : [];
+  for (const entry of j.groups) {
+    await syncReceipt(j, entry, entry === j.groups[0] ? made : []);
+  }
+
+  return { converted: true, mode: "vault", moved, stuck, decoys: made.length };
+}
+
+/** Retitle the live tuck folder, so the name field means something mid-share. */
+async function renameTuckFolders(j, name) {
+  const title = String(name ?? "").trim().slice(0, 60);
+  if (!title || title === j.folderTitle) return { renamed: false };
+  let renamed = 0;
+  for (const entry of j.groups) {
+    if (!entry.folderId) continue;
+    if (await bmUpdate(entry.folderId, { title })) renamed++;
+  }
+  if (renamed === 0) return { renamed: false };
+  // After the rename, never before: the title is what the orphan sweep hunts
+  // by, and a journal naming a folder that does not exist yet would let it
+  // reach a folder of the user's under the old name.
+  j.folderTitle = title;
+  await journal.write(j);
+  return { renamed: true, name: title };
+}
+
+/**
+ * Apply a just-saved settings change to the hide that is currently running.
+ * Returns null when there was nothing live to change, which is the ordinary
+ * case: the bar is not hidden, and the preference simply waits for the next one.
+ */
+async function retuneLive(patch, saved) {
+  const j = await liveHide();
+  if (!j) return null;
+  const mode = j.mode ?? "vault";
+
+  // The mode switch first, and alone. It rebuilds the cover from scratch in the
+  // other mechanism, reading the placeholder preference as it has just been
+  // saved -- so a single patch that changes both settles in one pass, with no
+  // second pass undoing half of it.
+  if (typeof patch?.tuckMode === "boolean" && patch.tuckMode !== (mode === "tuck")) {
+    const res = patch.tuckMode
+      ? await toTuckLive(j, saved.tuckName)
+      : await toVaultLive(j, saved.decoys);
+    return { switched: patch.tuckMode ? "tuck" : "vault", ...res };
+  }
+
+  if (typeof patch?.decoys === "boolean" && mode === "vault") {
+    return await setDecoysLive(j, patch.decoys);
+  }
+
+  if (typeof patch?.tuckName === "string" && mode === "tuck") {
+    return await renameTuckFolders(j, saved.tuckName);
+  }
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------

@@ -227,6 +227,14 @@
             />
           </div>
 
+          <!-- What a switch just did to a hide that was already running. Sits
+               directly under the two switches, not at the foot of the panel: it
+               is the answer to the thing the user just clicked, and an
+               acknowledgement they have to scroll to find is not one. Hidden
+               until there is something to say, which is only ever while the bar
+               is hidden -- with it up, a setting is just a setting. -->
+          <p class="settings__live" id="liveNote" hidden></p>
+
           <!-- Feature 3: never lose the bar. Copy is instant here; the rest
                (download, import) needs a file dialog, which closes a popup, so
                it opens the backup page. -->

@@ -1008,6 +1008,90 @@ async function testDeveloperControlsShipToNobody() {
       DEV_IDS.every((id) => unknown(id).onclick === null));
 }
 
+// P-4 the settings panel now describes work done to bookmarks that are on
+// screen, so it has to say what happened -- and, when the engine declined to
+// touch a live hide, has to say that instead of implying it worked. Silence
+// with the bar up is the third case and the ordinary one: a setting is then
+// just a setting, the engine sends no `live` block, and the note stays away.
+async function testPopupReportsWhatASwitchDidToALiveHide() {
+  const hidden = (mode) => ({
+    hidden: true, state: "hidden", mode, since: Date.now() - 60_000, dirty: false,
+    itemsDisplaced: 12, ownedVaults: mode === "vault" ? 1 : 0, pendingAdoption: [],
+    skippedBars: 0, bars: [{ barId: "1", syncing: true, children: 6 }],
+  });
+
+  /** Flip a control and let the save round trip settle. */
+  const flip = async (el, id, checked) => {
+    el(id).checked = checked;
+    await el(id).onchange({ currentTarget: el(id) });
+  };
+
+  const applied = await renderPopup({
+    status: hidden("vault"),
+    shares: { sharing: 1, frames: [{ frame: "42:0", sessions: 1, quietMs: 100 }] },
+    lastFailure: null,
+    setSettings: {
+      decoys: true, tuckMode: false, tuckName: "Bookmarks",
+      live: { changed: true, decoys: 6 },
+    },
+  });
+  await flip(applied, "decoyToggle", true);
+  check("P-4 a switch that changed the running hide says so",
+    applied("liveNote").hidden === false &&
+      /on your bar now/.test(applied("liveNote").textContent),
+    applied("liveNote").textContent);
+
+  const refused = await renderPopup({
+    status: hidden("vault"),
+    shares: { sharing: 1, frames: [] },
+    lastFailure: null,
+    setSettings: {
+      decoys: true, tuckMode: true, tuckName: "Bookmarks",
+      live: { switched: "tuck", converted: false, reason: "exposed" },
+    },
+  });
+  await flip(refused, "tuckToggle", true);
+  check("P-4 a refused conversion is reported as refused, not as done",
+    refused("liveNote").hidden === false &&
+      refused("liveNote").dataset.tone === "warn" &&
+      /Hide again/.test(refused("liveNote").textContent),
+    refused("liveNote").textContent);
+
+  // The other way a conversion declines: it tried and could not finish -- a bar
+  // with no Other Bookmarks to pair with, a create that failed. The hide is
+  // still whole in one mode or the other, and the user needs to know the switch
+  // they just flipped applies from next time, not now.
+  const failed = await renderPopup({
+    status: hidden("tuck"),
+    shares: { sharing: 1, frames: [] },
+    lastFailure: null,
+    setSettings: {
+      decoys: true, tuckMode: false, tuckName: "Bookmarks",
+      live: { switched: "vault", converted: false, error: "no vault home for this bar" },
+    },
+  });
+  await flip(failed, "tuckToggle", false);
+  check("P-4 a conversion that could not finish says so too",
+    failed("liveNote").hidden === false &&
+      failed("liveNote").dataset.tone === "warn" &&
+      /next hide/.test(failed("liveNote").textContent),
+    failed("liveNote").textContent);
+
+  const atRest = await renderPopup({
+    status: {
+      hidden: false, state: "clear", mode: null, since: null, dirty: false,
+      itemsDisplaced: 0, ownedVaults: 0, pendingAdoption: [], skippedBars: 0,
+      bars: [{ barId: "1", syncing: true, children: 6 }],
+    },
+    shares: { sharing: 0, frames: [] },
+    lastFailure: null,
+    setSettings: { decoys: false, tuckMode: false, tuckName: "Bookmarks" },
+  });
+  await flip(atRest, "decoyToggle", false);
+  check("P-4 and with the bar up there is nothing to report, so it stays quiet",
+    atRest("liveNote").hidden === true, atRest("liveNote").textContent);
+}
+
 // M3 fault injection across the RESTORE phase, which was never covered.
 async function testFaultInjectionRestore(maxCalls = 60) {
   let repaired = 0, broken = 0;
@@ -2858,6 +2942,360 @@ async function testTuckModeSurvivesInterruption(maxCalls = 70) {
   return { repaired, broken, brokenAt };
 }
 
+// --------------------------------------------------------------------------
+// LIVE SETTINGS -- a switch flipped while the bar is HIDDEN has to change the
+// hide that is already running, because the moment a user reaches for it is
+// mid-call, and the alternative was putting every bookmark back on a live
+// screen share to change its mind.
+//
+// The bar is the thing under test in all of it. Three properties matter, in
+// this order: nothing real ever appears on the bar during a conversion; the
+// journal keeps naming every item so a crash at any await restores exactly;
+// and the receipt keeps telling the truth about placeholders that now exist or
+// no longer do, because it is the record an uninstall leaves behind.
+
+const barTitlesOf = (mock) => barNodes(mock).map((n) => n.title);
+
+/** The receipt the journal is pointing at, decoded. */
+function receiptPayload(mock) {
+  const j = mock.storage.get("secureshare.journal");
+  const id = j?.groups?.[0]?.receiptId;
+  const node = id ? mock.nodes.get(id) : null;
+  return node ? receiptMod.decode(node.url) : null;
+}
+
+/** Any vault anywhere still holding something of the user's. */
+const strandedItems = (mock) =>
+  [...mock.nodes.values()]
+    .filter((n) => !n.url && (n.title.startsWith("Skrim —") || n.title.startsWith("SecureShare —")))
+    .reduce((n, v) => n + vaultItems(mock, v).length, 0);
+
+async function testLiveDecoysAppearAndVanishWhileHidden() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const before = JSON.stringify(mock.snapshot("1"));
+
+  await engine.setSettings({ decoys: false });
+  await engine.conceal();
+  check("live-decoys: precondition -- the hidden bar is empty", barNodes(mock).length === 0);
+
+  const on = await engine.setSettings({ decoys: true });
+  check("live-decoys: turning them on mid-hide reports what it did",
+    on.live?.changed === true && on.live?.decoys === 6, JSON.stringify(on.live));
+  const bar = barTitlesOf(mock);
+  check("live-decoys: and the six placeholders are on the bar NOW, with no re-hide",
+    bar.length === 6 && bar.includes("Google") && bar.includes("Maps"), bar.join(","));
+
+  // The receipt is what a user has left after an uninstall, so it has to name
+  // the placeholders that now exist -- or nobody ever tells them to delete six
+  // bookmarks they did not make.
+  check("live-decoys: the receipt names the placeholders it now stands beside",
+    receiptPayload(mock)?.decoys?.length === 6,
+    JSON.stringify(receiptPayload(mock)?.decoys?.length));
+
+  const off = await engine.setSettings({ decoys: false });
+  check("live-decoys: turning them off takes them straight back off the bar",
+    off.live?.changed === true && off.live?.removed === 6 && barNodes(mock).length === 0,
+    JSON.stringify(off.live));
+  check("live-decoys: and the receipt stops naming bookmarks that no longer exist",
+    (receiptPayload(mock)?.decoys ?? []).length === 0);
+
+  const r = await engine.restore();
+  check("live-decoys: the bar still comes back byte-identical",
+    r.ok === true && JSON.stringify(mock.snapshot("1")) === before);
+}
+
+async function testLiveDecoysAreNotDoubled() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  await engine.conceal();
+  check("live-decoys: precondition -- a hide with placeholders", barNodes(mock).length === 6);
+
+  const again = await engine.setSettings({ decoys: true });
+  check("live-decoys: asking for placeholders that are already there adds none",
+    again.live?.changed === false && barNodes(mock).length === 6,
+    `${barNodes(mock).length} on the bar`);
+  await engine.restore();
+}
+
+async function testLiveDecoysDoNothingWhileTucked() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  await tuckOn(engine);
+  await engine.conceal();
+
+  const r = await engine.setSettings({ decoys: true });
+  check("live-decoys: the switch does nothing while tucked -- the folder is the cover",
+    !r.live && barNodes(mock).length === 1, JSON.stringify(r.live));
+  check("live-decoys: and the preference is still stored for a vault hide later",
+    r.decoys === true);
+  await engine.restore();
+}
+
+async function testLiveSwitchToTuck() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const before = JSON.stringify(mock.snapshot("0"));
+  const barBefore = barTitlesOf(mock);
+
+  await engine.conceal(); // vault hide, placeholders on by default
+  check("live-switch: precondition -- a vault hide with placeholders",
+    barNodes(mock).length === 6 && !!findVault(mock));
+
+  const r = await engine.setSettings({ tuckMode: true });
+  check("live-switch: flipping tuck on converts the hide that is running",
+    r.live?.converted === true && r.live?.switched === "tuck" && r.live?.moved === barBefore.length,
+    JSON.stringify(r.live));
+
+  const bar = barNodes(mock);
+  check("live-switch: the bar now holds exactly one folder and no placeholders",
+    bar.length === 1 && bar[0].url === undefined && bar[0].title === "Bookmarks",
+    bar.map((n) => n.title).join(","));
+  const inside = mock.nodes.get(bar[0].id).children.map((c) => mock.nodes.get(c).title);
+  check("live-switch: with every bookmark inside it, in the order the bar had them",
+    JSON.stringify(inside) === JSON.stringify(barBefore), inside.join(","));
+  check("live-switch: and the vault it came out of is gone", !findVault(mock));
+
+  const st = await engine.status();
+  check("live-switch: the journal now describes a tuck, still the same hide",
+    st.hidden === true && st.mode === "tuck" && st.itemsDisplaced === barBefore.length,
+    JSON.stringify({ hidden: st.hidden, mode: st.mode, n: st.itemsDisplaced }));
+
+  const u = await engine.restore();
+  check("live-switch: restoring after the switch is byte-identical, whole tree",
+    u.ok === true && JSON.stringify(mock.snapshot("0")) === before);
+}
+
+async function testLiveSwitchToVault() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const before = JSON.stringify(mock.snapshot("0"));
+  const barBefore = barTitlesOf(mock);
+
+  await tuckOn(engine);
+  await engine.conceal();
+  check("live-switch: precondition -- a tuck hide", barNodes(mock).length === 1);
+
+  const r = await engine.setSettings({ tuckMode: false });
+  check("live-switch: flipping tuck off converts it back the other way",
+    r.live?.converted === true && r.live?.switched === "vault" && r.live?.decoys === 6,
+    JSON.stringify(r.live));
+
+  const bar = barNodes(mock);
+  check("live-switch: the folder is off the bar and the placeholders are on it",
+    bar.length === 6 && bar.every((n) => n.url !== undefined) && !bar.some((n) => n.title === "Bookmarks"),
+    bar.map((n) => n.title).join(","));
+
+  const vault = findVault(mock);
+  check("live-switch: a vault now holds every bookmark",
+    !!vault && vaultItems(mock, vault).length === barBefore.length,
+    `${vault ? vaultItems(mock, vault).length : "no vault"}`);
+  check("live-switch: with a receipt naming the placeholders it just created",
+    receiptPayload(mock)?.decoys?.length === 6);
+  check("live-switch: and the journal describes a vault hide",
+    (await engine.status()).mode === "vault");
+
+  const u = await engine.restore();
+  check("live-switch: restoring after the switch back is byte-identical, whole tree",
+    u.ok === true && JSON.stringify(mock.snapshot("0")) === before);
+}
+
+async function testLiveSwitchRoundTripsBothWays() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const before = JSON.stringify(mock.snapshot("0"));
+
+  await engine.conceal();
+  for (const tuckMode of [true, false, true, false, true]) {
+    await engine.setSettings({ tuckMode });
+  }
+  check("live-switch: five conversions later, the bar still holds no real bookmark",
+    barNodes(mock).every((n) => n.title === "Bookmarks" && n.url === undefined),
+    barTitlesOf(mock).join(","));
+
+  const u = await engine.restore();
+  check("live-switch: and the whole tree still comes back byte-identical",
+    u.ok === true && JSON.stringify(mock.snapshot("0")) === before,
+    JSON.stringify(u).slice(0, 160));
+}
+
+async function testLiveSwitchNeverPutsABookmarkOnScreen() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const real = new Set(FIXTURE.map((f) => f.title));
+
+  // Chrome reports every mutation, and the mock dispatches those reports AHEAD
+  // of the mutating call's own continuation -- so this listener sees the bar
+  // between every step of a conversion, which is exactly where a "move it out
+  // via the bar" implementation would show itself.
+  const exposures = [];
+  const watch = () => {
+    const on = barNodes(mock).filter((n) => real.has(n.title));
+    if (on.length > 0) exposures.push(on.map((n) => n.title).join(","));
+  };
+  mock.api.bookmarks.onCreated.addListener(watch);
+  mock.api.bookmarks.onMoved.addListener(watch);
+  mock.api.bookmarks.onRemoved.addListener(watch);
+
+  await engine.conceal();
+  await new Promise((r) => setTimeout(r, 0));
+  exposures.length = 0; // the hide itself is proven elsewhere; watch the switch
+
+  await engine.setSettings({ tuckMode: true });
+  await engine.setSettings({ tuckMode: false });
+  await new Promise((r) => setTimeout(r, 0));
+  check("live-switch: no real bookmark is ever on the bar mid-conversion",
+    exposures.length === 0, exposures.slice(0, 3).join(" | "));
+  await engine.restore();
+}
+
+async function testLiveSwitchRefusesAnExposedBar() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const before = JSON.stringify(mock.snapshot("0"));
+
+  await engine.conceal();
+  // The user drags one bookmark back out of the vault onto the bar. The hide
+  // the journal describes is no longer true, and a conversion is not the tool
+  // for that -- the next hide's reconcile is.
+  const vault = findVault(mock);
+  const dragged = vaultItems(mock, vault)[0];
+  await mock.api.bookmarks.move(dragged, { parentId: "1", index: 0 });
+
+  const r = await engine.setSettings({ tuckMode: true });
+  check("live-switch: refuses to convert a hide the user has already broken",
+    r.live?.converted === false && r.live?.reason === "exposed", JSON.stringify(r.live));
+  check("live-switch: and moved nothing",
+    !!findVault(mock) && barNodes(mock).some((n) => n.id === dragged));
+  check("live-switch: the preference is stored all the same, for the next hide",
+    r.tuckMode === true);
+
+  const u = await engine.restore();
+  check("live-switch: the refused conversion left restore exact",
+    u.ok === true && JSON.stringify(mock.snapshot("0")) === before);
+}
+
+async function testLiveRenameFollowsTheFolder() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const before = JSON.stringify(mock.snapshot("0"));
+
+  await tuckOn(engine);
+  await engine.conceal();
+  const folderId = barNodes(mock)[0].id;
+
+  const r = await engine.setSettings({ tuckName: "Reading list" });
+  check("live-rename: renaming mid-tuck renames the folder that is on the bar",
+    r.live?.renamed === true && mock.nodes.get(folderId).title === "Reading list",
+    mock.nodes.get(folderId).title);
+  check("live-rename: and the journal follows it, so its orphan sweep still matches",
+    mock.storage.get("secureshare.journal").folderTitle === "Reading list");
+
+  const u = await engine.restore();
+  check("live-rename: the renamed folder is still cleaned up on restore",
+    u.ok === true && JSON.stringify(mock.snapshot("0")) === before);
+}
+
+async function testSettingsAreSilentWhenNothingIsHidden() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const before = JSON.stringify(mock.snapshot("0"));
+
+  const a = await engine.setSettings({ decoys: false });
+  const b = await engine.setSettings({ tuckMode: true });
+  const c = await engine.setSettings({ tuckName: "Whatever" });
+  check("live-settings: with the bar up, a setting is just a setting",
+    !a.live && !b.live && !c.live);
+  check("live-settings: and nothing in the tree was touched",
+    JSON.stringify(mock.snapshot("0")) === before);
+  check("live-settings: the preferences are stored either way",
+    b.tuckMode === true && c.tuckName === "Whatever" && a.decoys === false);
+}
+
+async function testLiveSettingsLeaveAHideInFlightAlone() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  await engine.conceal();
+  const before = JSON.stringify(mock.snapshot("0"));
+
+  // A hide the worker died in the middle of. Its journal is a PLAN at this
+  // point rather than a description of the tree, and the watchdog's recover is
+  // what finishes it -- so a switch must not start rewriting it underneath.
+  const j = mock.storage.get("secureshare.journal");
+  j.state = "hiding";
+  mock.storage.set("secureshare.journal", j);
+
+  const r = await engine.setSettings({ tuckMode: true });
+  check("live-settings: a hide that is still mid-flight is left alone",
+    !r.live && JSON.stringify(mock.snapshot("0")) === before, JSON.stringify(r.live));
+  check("live-settings: and the preference is stored for whenever it settles",
+    r.tuckMode === true);
+
+  const u = await engine.recover({ maxHiddenMs: 0 });
+  check("live-settings: so recovery still finishes the interrupted hide exactly",
+    u.ok === true, JSON.stringify(u).slice(0, 120));
+}
+
+async function testLiveSwitchLeavesTheJournalClean() {
+  const mock = build();
+  const { engine } = await loadSw(mock);
+  const before = JSON.stringify(mock.snapshot("0"));
+
+  await engine.conceal();
+  await flush(engine);
+  await engine.setSettings({ tuckMode: true });
+  await flush(engine);
+
+  const j = mock.storage.get("secureshare.journal");
+  check("live-switch: the conversion's OWN events do not mark the journal dirty",
+    j.dirty !== true, `dirty=${j?.dirty} reason=${j?.dirtyReason}`);
+  check("live-switch: events really were delivered (else this proves nothing)",
+    mock.events.length > 0, `${mock.events.length} events`);
+
+  const u = await engine.restore();
+  check("live-switch: so restore replays exact positions rather than appending",
+    u.ok === true && JSON.stringify(mock.snapshot("0")) === before);
+}
+
+/**
+ * The sweep that matters for any of this: kill the worker at call N of a
+ * conversion and prove the bar still comes back exactly, from either direction.
+ *
+ * Judged on the BAR plus "no vault anywhere still holds a bookmark of the
+ * user's" -- deliberately stricter than the hide sweeps on the second count and
+ * deliberately not stricter on the first. A crash in the one call between
+ * creating a folder and recording it can leave an EMPTY vault parked in Other
+ * Bookmarks: unowned and unjournalled, it is indistinguishable from a synced
+ * peer's live hide, which this extension will not delete on a guess (see
+ * sweepOrphanVaults). It costs the user nothing and the badge explains it.
+ */
+async function testLiveSwitchSurvivesInterruption(toTuck, maxCalls = 90) {
+  let repaired = 0, broken = 0;
+  const brokenAt = [];
+  for (let n = 1; n <= maxCalls; n++) {
+    const mock = build();
+    const before = JSON.stringify(mock.snapshot("1"));
+    const engine = await loadEngine(mock);
+    if (!toTuck) await tuckOn(engine);
+    await engine.conceal();
+
+    mock.calls = 0;
+    mock.failAt = n;
+    try { await engine.setSettings({ tuckMode: toTuck }); } catch { /* expected */ }
+    if (!mock.failed) break; // ran out of calls to fail
+
+    // The worker dies and restarts: fault cleared, recovery runs.
+    mock.failAt = null;
+    try { await engine.recover({ maxHiddenMs: 0 }); } catch { /* must not throw */ }
+    try { await engine.recover({ maxHiddenMs: 0 }); } catch { /* idempotent 2nd pass */ }
+
+    const after = JSON.stringify(mock.snapshot("1"));
+    if (after === before && strandedItems(mock) === 0) repaired++;
+    else { broken++; brokenAt.push(n); }
+  }
+  return { repaired, broken, brokenAt };
+}
+
 async function testExportBarSerializes() {
   const mock = build();
   const engine = await loadEngine(mock);
@@ -3135,6 +3573,7 @@ await testBrokenApiDoesNotSilenceTheWorker();
 await testPopupWarnsAboutSyncOnlyWhenTheBarSyncs();
 await testPopupExplainsAPeerHideInsteadOfOfferingRecovery();
 await testDeveloperControlsShipToNobody();
+await testPopupReportsWhatASwitchDidToALiveHide();
 await testDecoySettingControlsHide();
 await testTuckModeConcealRoundTrip();
 await testTuckModeLeavesNothingRealOnTheBar();
@@ -3143,6 +3582,18 @@ await testTuckModeRestoreFollowsTheJournalNotTheToggle();
 await testTuckModeReassertIsIdempotent();
 await testTuckModeReconcilesAManuallyEmptiedFolder();
 await testTuckModeEndToEndShare();
+await testLiveDecoysAppearAndVanishWhileHidden();
+await testLiveDecoysAreNotDoubled();
+await testLiveDecoysDoNothingWhileTucked();
+await testLiveSwitchToTuck();
+await testLiveSwitchToVault();
+await testLiveSwitchRoundTripsBothWays();
+await testLiveSwitchNeverPutsABookmarkOnScreen();
+await testLiveSwitchRefusesAnExposedBar();
+await testLiveRenameFollowsTheFolder();
+await testSettingsAreSilentWhenNothingIsHidden();
+await testLiveSettingsLeaveAHideInFlightAlone();
+await testLiveSwitchLeavesTheJournalClean();
 await testExportBarSerializes();
 await testExportRefusesWhileHidden();
 await testImportAddsAFolderNonDestructively();
@@ -3155,6 +3606,8 @@ await testPortableToleratesMalformedInput();
 const fi = await testFaultInjection();
 const fr = await testFaultInjectionRestore();
 const ft = await testTuckModeSurvivesInterruption();
+const fs2t = await testLiveSwitchSurvivesInterruption(true);
+const fs2v = await testLiveSwitchSurvivesInterruption(false);
 
 console.log("=".repeat(66));
 console.log(`Skrim engine tests — ${Date.now() - t0}ms`);
@@ -3174,6 +3627,14 @@ console.log(`\n  FAULT INJECTION — TUCK hide:`);
 console.log(`    fully repaired  : ${ft.repaired}`);
 console.log(`    NOT repaired    : ${ft.broken}`);
 if (ft.brokenAt.length) console.log(`    broken at calls : ${ft.brokenAt.join(", ")}`);
+console.log(`\n  FAULT INJECTION — LIVE SWITCH, vault -> tuck:`);
+console.log(`    fully repaired  : ${fs2t.repaired}`);
+console.log(`    NOT repaired    : ${fs2t.broken}`);
+if (fs2t.brokenAt.length) console.log(`    broken at calls : ${fs2t.brokenAt.join(", ")}`);
+console.log(`\n  FAULT INJECTION — LIVE SWITCH, tuck -> vault:`);
+console.log(`    fully repaired  : ${fs2v.repaired}`);
+console.log(`    NOT repaired    : ${fs2v.broken}`);
+if (fs2v.brokenAt.length) console.log(`    broken at calls : ${fs2v.brokenAt.join(", ")}`);
 
 if (failures.length) {
   console.log(`\n  FAILURES:`);

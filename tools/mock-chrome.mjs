@@ -252,6 +252,20 @@ export class MockChrome {
           self._emit("onCreated", id, view);
           return view;
         },
+        // Title/url edits. Chrome emits only onChanged for these -- no move, no
+        // create -- which is exactly why the engine does not self-attribute
+        // them: onChanged is deliberately not wired to markDirty.
+        async update(id, changes) {
+          self._tick();
+          const node = self.nodes.get(id);
+          if (!node) throw new Error("Can't find bookmark for id.");
+          if (node.unmodifiable) throw new Error("Can't modify managed bookmark.");
+          if (typeof changes?.title === "string") node.title = changes.title;
+          if (typeof changes?.url === "string" && node.url !== undefined) node.url = changes.url;
+          const view = self._view(id, false);
+          self._emit("onChanged", id, { title: node.title, url: node.url });
+          return view;
+        },
         async move(id, { parentId, index }) {
           self._tick();
           const node = self.nodes.get(id);
