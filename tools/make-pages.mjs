@@ -486,12 +486,138 @@ const wallPage = () => ({
   related: ["hide-bookmarks-bar", "hide-bookmarks-bar-google-meet", "hide-bookmarks-bar-zoom"],
 });
 
+// ------------------------------------------------------------------- support
+
+// The Chrome Web Store listing has a Support URL field, and the dashboard
+// fetches it at submit time -- a 404 there fails validation and blocks the
+// submission outright, which is how this page came to exist. It is a real
+// support page rather than a redirect to the homepage because the person who
+// clicks that link has a problem, and every one of the common problems is
+// already answered somewhere in this repo.
+//
+// Generated rather than hand-written for the reason at the top of this file,
+// and specifically so it can reuse LIMITS and SYNC_NOTE verbatim: the day a
+// limit changes it changes here too, instead of this page quietly disagreeing
+// with the four that carry the same block.
+//
+// No waitlist CTA. Whoever is on this page either already has Skrim or is a
+// reviewer checking the link resolves, and asking either of them for an email
+// address is noise.
+const supportPage = () => ({
+  slug: "support",
+  cta: false,
+  title: "Support",
+  description:
+    "Help with Skrim: getting your bookmarks back, why the bar did not hide, what Chrome Sync does to your other computers, and how to reach a person.",
+  h1: "Support",
+  answer: `
+      <p>
+        Email <a href="mailto:support@skrim.app">support@skrim.app</a> and a
+        person will read it.
+      </p>
+      <p>
+        If your bookmarks are missing right now, start with
+        <a href="#missing">the first section below</a> rather than the email —
+        nothing was deleted, and you can have them back in about a minute
+        without waiting on a reply.
+      </p>`,
+  body: `
+      <h2 id="missing">My bookmarks are missing</h2>
+      <p>
+        Nothing was deleted. While the bar is hidden, every bookmark that was on
+        it is moved into a folder inside <b>Other bookmarks</b> whose name begins
+        “hidden while screen sharing”. They are in your browser right now,
+        whether or not Skrim is still installed.
+      </p>
+      <ul>
+        <li>
+          <b>With Skrim installed:</b> open it from the toolbar. It finds that
+          folder, reads the receipt inside it, and puts every bookmark back in
+          the position it came from — then removes the folder and any
+          placeholder links.
+        </li>
+        <li>
+          <b>Without it:</b> <a href="/restore">the restore page</a> walks
+          through putting them back by hand from Chrome's bookmark manager. That
+          page works with Skrim uninstalled, disabled or broken.
+        </li>
+      </ul>
+
+      <h2 id="did-not-hide">The bar did not hide when I shared my screen</h2>
+      <p>
+        Skrim takes the bar down when something in Chrome asks Chrome for your
+        screen. The usual reason nothing happened is that the share never went
+        through Chrome at all.
+      </p>
+${LIMITS}
+      <p class="check">
+        Two things worth confirming on your own machine: Skrim needs Chrome 116
+        or later, and it has to be enabled. Open <code>chrome://extensions</code>
+        and check the toggle.
+      </p>
+
+      <h2 id="sync">My other computer's bookmarks went empty too</h2>
+${SYNC_NOTE}
+      <p>
+        The setting for this is <b>Tuck the bar into a folder</b>, under
+        <b>Settings &amp; backup</b> in the popup. With it on, hiding parks the
+        bar inside a single folder that stays where it is instead of clearing
+        it, so your other signed-in computers keep their bookmarks.
+      </p>
+
+      <h2 id="settings">What the settings do</h2>
+      <ul>
+        <li>
+          <b>Placeholder links.</b> Leaves a few neutral bookmarks on the bar
+          while it is hidden. A bar that goes suddenly empty is its own
+          giveaway.
+        </li>
+        <li>
+          <b>Tuck the bar into a folder.</b> Parks the bar in one folder instead
+          of clearing it, and lets you name the folder. This is the sync answer
+          above.
+        </li>
+        <li>
+          <b>Back up your bookmarks.</b> <b>Copy as text</b> puts the list on
+          your clipboard for a note or a message. <b>Download / import…</b>
+          opens a page that writes a file you keep, and reads one back in.
+        </li>
+      </ul>
+      <p>
+        Both switches also apply to a hide that is already running — flip one
+        mid-share and the popup tells you what it just changed.
+      </p>
+
+      <h2 id="bug">Reporting a bug</h2>
+      <p>Email <a href="mailto:support@skrim.app">support@skrim.app</a> with:</p>
+      <ul>
+        <li>Your Chrome version (from <code>chrome://version</code>) and your operating system.</li>
+        <li>What was sharing — Google Meet, Zoom in a tab, a recorder, something else.</li>
+        <li>What the Skrim popup said at the time, if you got a look at it.</li>
+      </ul>
+      <p class="check">
+        A screenshot helps, but not one of a bookmarks bar carrying anything you
+        would not want seen. Describe it instead.
+      </p>
+
+      <h2 id="privacy">What Skrim knows about you</h2>
+      <p>
+        Nothing. The extension makes no network requests of any kind — no
+        server, no account, no analytics — which also means there is no
+        telemetry for anyone to look at when you write in. That is why the bug
+        report above asks for so much detail. The
+        <a href="/privacy">privacy policy</a> is the long version.
+      </p>`,
+  related: ["hide-bookmarks-bar", "hide-bookmarks-bar-google-meet", "hide-bookmarks-bar-zoom"],
+});
+
 // ------------------------------------------------------------------ template
 
 // The wall joins the build only once it has something on it. Everything
 // downstream -- sitemap, footer link, related-rail validation -- reads this
-// list, so one condition governs the whole thing.
-const ALL = QUOTES.length ? [...PAGES, wallPage()] : [...PAGES];
+// list, so one condition governs the whole thing. Support is unconditional: the
+// store listing points at it, so it must exist on every build.
+const ALL = [...PAGES, ...(QUOTES.length ? [wallPage()] : []), supportPage()];
 
 const bySlug = Object.fromEntries(ALL.map((p) => [p.slug, p]));
 
@@ -502,6 +628,7 @@ const SHORT = {
   "hide-bookmarks-bar-zoom": "Hiding it in Zoom (desktop and web)",
   "hide-bookmarks-bar-screen-recording": "Hiding it while recording your screen",
   wall: "What people say about Skrim",
+  support: "Support, and getting your bookmarks back",
 };
 
 // The CTA. Waitlist until STORE_URL is set, "Add to Chrome" after. The form
@@ -778,7 +905,7 @@ function render(page) {
         <div class="answer">${page.answer.trim()}
         </div>
 ${page.body.trimEnd()}
-${cta(page.slug)}
+${page.cta === false ? "" : cta(page.slug)}
 
         <nav class="related">
           <h2>Related</h2>
@@ -791,6 +918,7 @@ ${cta(page.slug)}
       <footer>
         <a href="/">Skrim</a>
         <a href="/privacy">Privacy</a>
+        <a href="/support">Support</a>
         <a href="/restore">Lost your bookmarks?</a>
         <span>© 2026 Skrim</span>
       </footer>

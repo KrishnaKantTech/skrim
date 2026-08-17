@@ -3,12 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>How to hide your bookmarks bar in Zoom (desktop app and web) — Skrim</title>
-    <meta name="description" content="Whether your bookmarks bar can be hidden automatically in Zoom depends on which Zoom you use — the desktop app or a browser tab. The honest answer for both." />
-    <link rel="canonical" href="https://skrim.app/hide-bookmarks-bar-zoom" />
-    <meta property="og:title" content="How to hide your bookmarks bar in Zoom" />
-    <meta property="og:description" content="Whether your bookmarks bar can be hidden automatically in Zoom depends on which Zoom you use — the desktop app or a browser tab. The honest answer for both." />
-    <meta property="og:url" content="https://skrim.app/hide-bookmarks-bar-zoom" />
+    <title>Support — Skrim</title>
+    <meta name="description" content="Help with Skrim: getting your bookmarks back, why the bar did not hide, what Chrome Sync does to your other computers, and how to reach a person." />
+    <link rel="canonical" href="https://skrim.app/support" />
+    <meta property="og:title" content="Support" />
+    <meta property="og:description" content="Help with Skrim: getting your bookmarks back, why the bar did not hide, what Chrome Sync does to your other computers, and how to reach a person." />
+    <meta property="og:url" content="https://skrim.app/support" />
     <meta property="og:type" content="article" />
     <meta property="og:image" content="https://skrim.app/og.png" />
     <meta name="twitter:card" content="summary_large_image" />
@@ -159,79 +159,47 @@
       </header>
 
       <main>
-        <h1>How to hide your bookmarks bar in Zoom</h1>
+        <h1>Support</h1>
         <div class="answer"><p>
-        It depends on which Zoom you use, and the difference matters more than
-        anything else on this page.
+        Email <a href="mailto:support@skrim.app">support@skrim.app</a> and a
+        person will read it.
       </p>
-      <ul class="split">
-        <li>
-          <b>Zoom desktop app</b> — no browser extension can help you, including
-          this one. The app captures your screen outside Chrome, where nothing
-          running inside Chrome can see it. Your options are manual, and they are
-          below.
-        </li>
-        <li>
-          <b>Zoom in a browser tab</b> — fully solvable, automatically.
-        </li>
-      </ul>
+      <p>
+        If your bookmarks are missing right now, start with
+        <a href="#missing">the first section below</a> rather than the email —
+        nothing was deleted, and you can have them back in about a minute
+        without waiting on a reply.
+      </p>
         </div>
 
-      <h2>If you use the Zoom desktop app</h2>
+      <h2 id="missing">My bookmarks are missing</h2>
       <p>
-        This is most people, and it is worth being blunt about: an extension runs
-        inside Chrome and can only know about things Chrome knows about. When the
-        Zoom desktop client captures your screen, it asks the operating system,
-        not the browser. Chrome is never told. Any extension claiming to cover
-        that case is claiming something it cannot do.
+        Nothing was deleted. While the bar is hidden, every bookmark that was on
+        it is moved into a folder inside <b>Other bookmarks</b> whose name begins
+        “hidden while screen sharing”. They are in your browser right now,
+        whether or not Skrim is still installed.
       </p>
-      <p>What actually works there:</p>
-      <ol>
+      <ul>
         <li>
-          <b>Share a specific window rather than your whole screen.</b> Zoom's
-          picker lets you choose one application window. If you pick a window
-          that is not Chrome, your bookmarks bar was never in frame to begin with.
+          <b>With Skrim installed:</b> open it from the toolbar. It finds that
+          folder, reads the receipt inside it, and puts every bookmark back in
+          the position it came from — then removes the folder and any
+          placeholder links.
         </li>
         <li>
-          <b>If you are sharing Chrome itself</b>, press
-          <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>
-          (<kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> on a Mac) before you click
-          Share, and put it back after.
+          <b>Without it:</b> <a href="/restore">the restore page</a> walks
+          through putting them back by hand from Chrome's bookmark manager. That
+          page works with Skrim uninstalled, disabled or broken.
         </li>
-        <li>
-          <b>Keep a second Chrome profile for presenting</b>, with a deliberately
-          empty bar. More setup, but it is the only one of these that cannot be
-          undone by forgetting.
-        </li>
-      </ol>
+      </ul>
 
-      <h2>If you use Zoom in a browser tab</h2>
+      <h2 id="did-not-hide">The bar did not hide when I shared my screen</h2>
       <p>
-        Zoom on the web goes through Chrome's own screen-share API, exactly like
-        Google Meet. Chrome knows the share started, so an extension can act on
-        it — and Zoom on the web is one of the two surfaces Skrim is tested
-        against end to end in a real browser.
+        Skrim takes the bar down when something in Chrome asks Chrome for your
+        screen. The usual reason nothing happened is that the share never went
+        through Chrome at all.
       </p>
-      <p>
-        Note that "Zoom on the web" means the meeting genuinely running in a
-        browser tab. If clicking a Zoom link hands off to the installed
-        application, you are in the first section, not this one.
-      </p>
-      
-<h2>Where Skrim comes in</h2>
-<p>
-  Skrim is a free Chrome extension that does one thing: it watches for a screen
-  share starting and takes your bookmarks bar down before the first frame goes
-  out, then puts every bookmark back at the exact position it came from when
-  the share ends. There is nothing to remember and nothing to press.
-</p>
-<p>
-  It makes no network requests of any kind — no server, no account, no
-  analytics — and that is a claim you can check rather than one you have to
-  take: the extension is source-available, and one <code>grep</code> for
-  <code>fetch</code> across the code comes back empty.
-</p>
-      
+
 <h2>What it does not cover</h2>
 <ul>
   <li>
@@ -250,7 +218,14 @@
     notifications, not your desktop. One bar is the whole job.
   </li>
 </ul>
-      
+      <p class="check">
+        Two things worth confirming on your own machine: Skrim needs Chrome 116
+        or later, and it has to be enabled. Open <code>chrome://extensions</code>
+        and check the toggle.
+      </p>
+
+      <h2 id="sync">My other computer's bookmarks went empty too</h2>
+
 <aside class="note">
   <b>If you use Chrome Sync:</b> bookmarks are synced data, so while the bar is
   hidden here it is also empty on your other signed-in devices until the share
@@ -259,38 +234,64 @@
   setting that tucks the bar into one folder instead of clearing it, if you
   would rather your other computers kept theirs.
 </aside>
+      <p>
+        The setting for this is <b>Tuck the bar into a folder</b>, under
+        <b>Settings &amp; backup</b> in the popup. With it on, hiding parks the
+        bar inside a single folder that stays where it is instead of clearing
+        it, so your other signed-in computers keep their bookmarks.
+      </p>
 
-      <section class="cta" id="get">
-        <h2>Have it happen on its own</h2>
-        <p>
-          Skrim is in review for the Chrome Web Store. One email when it ships,
-          and nothing else.
-        </p>
-        <form id="form" method="POST" action="/api/waitlist">
-          <label class="hp" aria-hidden="true">
-            Company
-            <input type="text" name="company" tabindex="-1" autocomplete="off" />
-          </label>
-          <input type="hidden" name="source" value="hide-bookmarks-bar-zoom" />
-          <input type="hidden" name="page" value="/hide-bookmarks-bar-zoom" />
-          <label class="sr" for="email">Email address</label>
-          <input id="email" type="email" name="email" required autocomplete="email"
-                 placeholder="you@example.com" />
-          <button type="submit" id="submit">Notify me</button>
-        </form>
-        <p class="note" id="note" hidden></p>
-        <p class="fineprint">
-          We store your address and the date, and use it once — to tell you Skrim
-          is out. See the <a href="/privacy#website">privacy policy</a>.
-        </p>
-      </section>
+      <h2 id="settings">What the settings do</h2>
+      <ul>
+        <li>
+          <b>Placeholder links.</b> Leaves a few neutral bookmarks on the bar
+          while it is hidden. A bar that goes suddenly empty is its own
+          giveaway.
+        </li>
+        <li>
+          <b>Tuck the bar into a folder.</b> Parks the bar in one folder instead
+          of clearing it, and lets you name the folder. This is the sync answer
+          above.
+        </li>
+        <li>
+          <b>Back up your bookmarks.</b> <b>Copy as text</b> puts the list on
+          your clipboard for a note or a message. <b>Download / import…</b>
+          opens a page that writes a file you keep, and reads one back in.
+        </li>
+      </ul>
+      <p>
+        Both switches also apply to a hide that is already running — flip one
+        mid-share and the popup tells you what it just changed.
+      </p>
+
+      <h2 id="bug">Reporting a bug</h2>
+      <p>Email <a href="mailto:support@skrim.app">support@skrim.app</a> with:</p>
+      <ul>
+        <li>Your Chrome version (from <code>chrome://version</code>) and your operating system.</li>
+        <li>What was sharing — Google Meet, Zoom in a tab, a recorder, something else.</li>
+        <li>What the Skrim popup said at the time, if you got a look at it.</li>
+      </ul>
+      <p class="check">
+        A screenshot helps, but not one of a bookmarks bar carrying anything you
+        would not want seen. Describe it instead.
+      </p>
+
+      <h2 id="privacy">What Skrim knows about you</h2>
+      <p>
+        Nothing. The extension makes no network requests of any kind — no
+        server, no account, no analytics — which also means there is no
+        telemetry for anyone to look at when you write in. That is why the bug
+        report above asks for so much detail. The
+        <a href="/privacy">privacy policy</a> is the long version.
+      </p>
+
 
         <nav class="related">
           <h2>Related</h2>
           <ul>
           <li><a href="/hide-bookmarks-bar">The full guide: four ways to hide it in Chrome</a></li>
           <li><a href="/hide-bookmarks-bar-google-meet">Hiding it in Google Meet</a></li>
-          <li><a href="/hide-bookmarks-bar-screen-recording">Hiding it while recording your screen</a></li>
+          <li><a href="/hide-bookmarks-bar-zoom">Hiding it in Zoom (desktop and web)</a></li>
           </ul>
         </nav>
       </main>
