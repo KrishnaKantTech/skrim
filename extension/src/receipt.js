@@ -65,13 +65,34 @@ function b64urlDecode(text) {
 // ---------------------------------------------------------------------------
 
 /**
- * Where a clicked receipt should land. Set RECOVERY_BASE to a hosted page once
- * one exists -- `site/restore.html` in this repo is that page, and it decodes
- * the same payload with no extension installed. Until then the receipt points
- * at the extension's own recovery page, which works for every case except the
- * uninstall, and the uninstall case is carried by the title.
+ * Where a clicked receipt should land. `site/restore.html` in this repo is that
+ * page, served at this URL: it decodes the same payload with no extension
+ * installed, which is the only reader that still exists after an uninstall.
+ *
+ * This costs NO egress and that is why it can be on. The payload rides in the
+ * fragment, which a browser never puts on the wire, so a receipt is a link the
+ * user may click -- not a request Skrim makes. A receipt written while this was
+ * null stays restorable either way: recognition is by the `ssr1.` token, never
+ * by the host.
  */
-export const RECOVERY_BASE = null;
+export const RECOVERY_BASE = "https://skrim.app/restore";
+
+/**
+ * Whether an uninstall gets a tab. Deliberately NOT the same switch as the one
+ * above, because it is not the same promise.
+ *
+ * `setUninstallURL` is a real GET carrying `n` and `at` in the QUERY string --
+ * a count of what was displaced and when -- and a query string does reach the
+ * server. That is one request more than "no network requests at all", the line
+ * the store listing and site/privacy.html both rest on and the nine "Not
+ * collected" disclosures are checked against.
+ *
+ * So turning this on is a listing change, not a code change, and keeping it a
+ * separate constant is what stops it riding along with a recovery page that
+ * costs nothing. The uninstall case is meanwhile carried by the receipt title,
+ * which needs no network and no page at all.
+ */
+export const UNINSTALL_PING = false;
 
 export function recoveryBase() {
   if (RECOVERY_BASE) return RECOVERY_BASE;
@@ -183,7 +204,7 @@ export const UNINSTALL_URL_MAX = 1023;
  * inside the vault has no limit and is already where the user is going. This is
  * the shout, not the map.
  */
-export function uninstallUrlFor(journal, base = RECOVERY_BASE) {
+export function uninstallUrlFor(journal, base = UNINSTALL_PING ? RECOVERY_BASE : null) {
   if (!base || !journal || journal.state === "clear") return "";
   const items = (journal.groups ?? []).reduce(
     (sum, entry) => sum + (entry.items?.length ?? 0),

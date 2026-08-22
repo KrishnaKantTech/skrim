@@ -19,9 +19,14 @@ this:
   memory.
 
 **If either of those changes, this file and `site/privacy.html` are both wrong
-until updated.** The first candidate is setting `receipt.RECOVERY_BASE`: a
-hosted recovery page turns the uninstall URL into a real request and breaks the
-"no network requests at all" line in the description.
+until updated.** The one candidate is setting `receipt.UNINSTALL_PING`: an
+uninstall URL is a real GET carrying a count and a timestamp in its query
+string, and it breaks the "no network requests at all" line in the description.
+
+`receipt.RECOVERY_BASE` is a different switch and does not touch this claim. It
+only decides where a receipt bookmark POINTS; the payload rides in the fragment,
+which a browser never transmits, so a receipt is a link the user may click
+rather than a request Skrim makes. It is set to `https://skrim.app/restore`.
 
 Run `node tools/check-listing.mjs` after any edit — it re-checks every character
 limit here against the real field caps and re-verifies the egress claim.

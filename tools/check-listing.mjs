@@ -193,13 +193,25 @@ check("no network egress in extension/", egress.length === 0, egress.join(", "))
 check("no remote resources in extension/", remote.length === 0, remote.join(", "));
 
 // setUninstallURL is the one line that would turn an uninstall into a real
-// request. It is guarded on RECOVERY_BASE, which is null, so today it never
+// request. It is guarded on UNINSTALL_PING, which is false, so today it never
 // fires -- and the description says so.
+//
+// RECOVERY_BASE is deliberately NOT what this checks. A receipt pointing at a
+// hosted page puts its payload in the fragment, which no browser transmits, so
+// that is a link the user may click and not a request Skrim makes. Only the
+// ping carries `n` and `at` in a query string, and only the ping is a claim.
 const receipt = fs.readFileSync(path.join(EXT, "src/receipt.js"), "utf8");
 check(
-  "RECOVERY_BASE still null",
-  /export const RECOVERY_BASE = null;/.test(receipt),
-  "a hosted recovery page makes the uninstall URL a real request -- the description and site/privacy.html both have to change with it",
+  "UNINSTALL_PING still false",
+  /export const UNINSTALL_PING = false;/.test(receipt),
+  "an uninstall URL is a real request carrying a count and a timestamp -- the description and site/privacy.html both have to change with it",
+);
+check(
+  "the uninstall URL is gated on the ping, not on the recovery page",
+  /!receipt\.UNINSTALL_PING\) return;/.test(
+    fs.readFileSync(path.join(EXT, "src/sw.js"), "utf8"),
+  ),
+  "sw.js must gate setUninstallURL on UNINSTALL_PING, or a hosted receipt silently turns the ping on",
 );
 
 check(

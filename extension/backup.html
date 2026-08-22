@@ -115,6 +115,10 @@
       .banner b { font-weight: 650; }
 
       .filehint { font-size: 0.82rem; color: var(--faint); margin: 0.6rem 0 0; }
+      /* These backups live inside the extension, so an uninstall takes them.
+         Said where the list is, not in the footer nobody reads. */
+      .keephint { font-size: 0.85rem; color: var(--muted); margin: 0.6rem 0 0; }
+      .keephint b { color: var(--text); font-weight: 650; }
       .visually-hidden {
         position: absolute; width: 1px; height: 1px; margin: -1px;
         padding: 0; border: 0; clip: rect(0 0 0 0); overflow: hidden;
@@ -286,6 +290,11 @@
       <p id="autoHint">
         A copy of your bar is saved right before every hide, and once a day if
         anything changed. Everything stays on this computer.
+      </p>
+      <p class="keephint">
+        <b>These live inside Skrim.</b> Uninstalling the extension deletes them.
+        Your bookmarks themselves are never touched by an uninstall &mdash; but to
+        keep a backup, download it as a file first.
       </p>
 
       <div class="newname">

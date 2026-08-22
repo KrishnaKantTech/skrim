@@ -96,6 +96,14 @@ async function flush(engine) {
   if (engine) await engine.status();
 }
 
+/** The worker fires refreshAction() without awaiting it, so anything it writes
+ *  -- the badge, the icon, the uninstall URL -- lands a few ticks after the
+ *  message resolves. Tests that assert on those have to let it finish. */
+async function settleAction(engine, mock) {
+  await mock.message({ type: "status" });
+  for (let i = 0; i < 5; i++) await flush(engine);
+}
+
 // The PRE-RENAME vault title, and it stays that way on purpose. Every seed
 // below plants a vault this installation did not create, which is exactly the
 // case the compat entry in `VAULT_TITLES` exists for -- so these tests are what
@@ -2723,12 +2731,17 @@ async function testReceiptSurvivesARename() {
       receiptMod.decode(undefined) === null);
 }
 
-// RC-8 the uninstall URL. Off until there is a page to point at, because a dead
-// link delivered at the moment of uninstall is worse than silence.
+// RC-8 the uninstall URL. It points at the hosted restore page, the one reader
+// that still exists once the extension is gone -- but only when something is
+// actually displaced, because a tab delivered over an intact bar is noise.
 async function testUninstallUrl() {
   const hidden = { state: "hidden", startedAt: 1000, groups: [{ items: [1, 2, 3] }] };
-  check("RC-8 nothing is set while no recovery page is configured",
-    receiptMod.uninstallUrlFor(hidden) === "" && receiptMod.RECOVERY_BASE === null);
+  check("RC-8 a receipt points at the hosted page, which costs no egress",
+    typeof receiptMod.RECOVERY_BASE === "string" &&
+      receiptMod.RECOVERY_BASE.startsWith("https://") &&
+      receiptMod.buildUrl({ x: 1 }).startsWith(`${receiptMod.RECOVERY_BASE}#ssr1.`));
+  check("RC-8 but the ping is a separate switch, and it is off",
+    receiptMod.UNINSTALL_PING === false && receiptMod.uninstallUrlFor(hidden) === "");
   check("RC-8 with one configured, it carries what was displaced and when",
     receiptMod.uninstallUrlFor(hidden, "https://x.example/r") ===
       "https://x.example/r?uninstalled=1&n=3&at=1000");
@@ -2739,12 +2752,19 @@ async function testUninstallUrl() {
     receiptMod.uninstallUrlFor(hidden, "https://x.example/" + "p".repeat(1100)).length <=
       receiptMod.UNINSTALL_URL_MAX + "https://x.example/".length + 1100);
 
+  // Driven through the worker's message path, not engine.hide() alone: the
+  // uninstall URL is re-synced by the action refresh, and a hide that never
+  // reaches the worker is not a hide a real user can perform.
   const mock = build();
   const { engine } = await loadSw(mock);
   await engine.hide({ decoys: false });
   await flush(engine);
-  check("RC-8 so a shipping build sets no uninstall URL today",
+  await settleAction(engine, mock);
+  check("RC-8 so a shipping build sets no uninstall URL, even mid-hide",
     mock.uninstallUrl === null, String(mock.uninstallUrl));
+  check("RC-8 and the receipt it wrote is a link the user may click",
+    (await mock.api.bookmarks.getSubTree("111"))[0].children
+      .some((k) => (k.url ?? "").startsWith(`${receiptMod.RECOVERY_BASE}#ssr1.`)));
   await engine.restore();
 }
 

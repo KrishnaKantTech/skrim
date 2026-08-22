@@ -131,14 +131,15 @@ const refreshAction = () => Promise.all([refreshIcon(), refreshBadge()]);
  * not the payload: the full recovery data is in the receipt inside the vault,
  * where there is no length limit and no need for it to be delivered.
  *
- * Off until there is a page to point at. A link to a domain that does not
- * resolve would be a worse first impression than saying nothing, and it would
- * arrive at the worst possible moment -- so this is deliberately gated on
- * receipt.RECOVERY_BASE, and turning it on is that one constant.
+ * Off by a switch of its own, receipt.UNINSTALL_PING -- NOT the switch that
+ * points a receipt at a hosted page. That one costs nothing because a fragment
+ * never leaves the browser; this one is a real GET carrying a count and a
+ * timestamp, which is the difference between "no network requests at all" and a
+ * listing that has to say otherwise. Turning it on is a disclosure decision.
  */
 async function syncUninstallUrl() {
   try {
-    if (!chrome.runtime.setUninstallURL || !receipt.RECOVERY_BASE) return;
+    if (!chrome.runtime.setUninstallURL || !receipt.UNINSTALL_PING) return;
     await chrome.runtime.setUninstallURL(receipt.uninstallUrlFor(await journal.read()));
   } catch (err) {
     console.warn("[secureshare] uninstall url failed", err);
