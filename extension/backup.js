@@ -44,6 +44,8 @@ const backupFile = (id) => call("backupFile", () => engine.backupFile(id), { id 
 const restoreBackup = (id, opts = {}) =>
   call("restoreBackup", () => engine.restoreBackup(id, opts), { id, ...opts });
 const deleteBackup = (id) => call("deleteBackup", () => engine.deleteBackup(id), { id });
+const renameBackup = (id, label) =>
+  call("renameBackup", () => engine.renameBackup(id, label), { id, label });
 const setSettings = (patch) =>
   call("setSettings", () => engine.setSettings(patch), { patch });
 
@@ -231,6 +233,7 @@ $("importFile").onchange = async (e) => {
 // beside a button that deletes things.
 
 const KIND_WORDS = {
+  original: "original",
   prehide: "before hide",
   daily: "daily",
   manual: "manual",
@@ -296,7 +299,7 @@ async function renderSnaps() {
   $("autoToggle").checked = res.autoBackup !== false;
   $("autoHint").textContent =
     res.autoBackup !== false
-      ? "A copy of your bar is saved right before every hide, and once a day if anything changed. Everything stays on this computer."
+      ? "A copy of your bar is saved when Skrim is installed, right before every hide, and once a day if anything changed. Everything stays on this computer."
       : "Automatic backups are off. Nothing is saved before a hide. You can still take one by hand below, and the backups already here are kept.";
 
   $("snapEmpty").hidden = res.entries.length > 0;
@@ -312,11 +315,15 @@ async function renderSnaps() {
   }
 
   const use = res.usage ?? {};
+  const hasOriginal = res.entries.some((e) => e.kind === "original");
   $("snapFoot").hidden = res.entries.length === 0;
   $("snapFoot").textContent =
     `${res.entries.length} ${res.entries.length === 1 ? "backup" : "backups"} kept` +
     (use.bytes ? `, ${sizeText(use.bytes)} in all` : "") +
-    ". Older ones are dropped by count, never by age — a backup is never deleted just for being old.";
+    ". Older ones are dropped by count, never by age — a backup is never deleted just for being old." +
+    (hasOriginal
+      ? " The one marked original is your bar as it was when you installed Skrim; it is kept for as long as Skrim is."
+      : "");
 
   setSnapBusy(false);
 }
@@ -324,6 +331,15 @@ async function renderSnaps() {
 function snapRow(e) {
   const li = document.createElement("li");
   li.className = "snap";
+  fillSnapRow(li, e);
+  return li;
+}
+
+/** The row as it reads. Kept apart from snapRow so the rename editor can put a
+ *  row back without a full re-render -- which would cost a round trip to the
+ *  worker and rebuild fourteen other rows to undo one Cancel. */
+function fillSnapRow(li, e) {
+  li.replaceChildren();
 
   const text = document.createElement("div");
   text.className = "snap__text";
@@ -359,12 +375,92 @@ function snapRow(e) {
   // Downloading reads a copy out of storage and needs nothing at all -- which
   // is exactly the button someone wants when their bar is mid-share.
   actions.appendChild(button("Put back", "primary", () => askRestore(e), true));
+  actions.appendChild(button("Rename", "", () => fillRenameRow(li, e), false));
   actions.appendChild(button("Download", "", () => downloadSnap(e), false));
   actions.appendChild(button("Delete", "", () => removeSnap(e), false));
 
   li.appendChild(text);
   li.appendChild(actions);
-  return li;
+}
+
+/**
+ * Rename in the row, not in a dialog.
+ *
+ * The <dialog> below is spent on the one button that rewrites the bookmarks
+ * bar, and it earns the interruption by reporting numbers the user has to weigh
+ * first. Charging the same interruption for typing a name would flatten the
+ * difference between the two. A name is also the edit where the row you are
+ * changing, sitting in the list of dates you are trying to tell apart, IS the
+ * context -- so taking it out of the list would remove the reason for it.
+ */
+function fillRenameRow(li, e) {
+  li.replaceChildren();
+
+  const form = document.createElement("form");
+  form.className = "snap__rename";
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "field";
+  input.maxLength = 60;
+  input.autocomplete = "off";
+  input.value = e.label ?? "";
+  input.placeholder = "Name this backup";
+  // The visible label for this row is a date, and a date is what a screen
+  // reader needs read back to know which of fifteen fields it has landed in.
+  input.setAttribute("aria-label", `Name for the backup from ${whenText(e.at)}`);
+
+  const save = button("Save", "primary", null, false);
+  save.type = "submit";
+  const cancel = button("Cancel", "", () => fillSnapRow(li, e), false);
+
+  // A <form> so Enter submits without a keydown handler saying so, and Escape
+  // puts the row back -- the two keys a one-field edit owes anyone who is not
+  // reaching for the mouse.
+  form.onsubmit = (ev) => {
+    ev.preventDefault();
+    commitRename(li, e, input.value);
+  };
+  input.onkeydown = (ev) => {
+    if (ev.key !== "Escape") return;
+    ev.preventDefault();
+    fillSnapRow(li, e);
+  };
+
+  form.append(input, save, cancel);
+  li.appendChild(form);
+  input.focus();
+  input.select();
+}
+
+async function commitRename(li, entry, value) {
+  const want = String(value ?? "").trim().slice(0, 60);
+  // Nothing typed, or nothing changed: put the row back without troubling the
+  // worker, so Save on an untouched field behaves exactly like Cancel.
+  if (want === (entry.label ?? "")) {
+    fillSnapRow(li, entry);
+    return;
+  }
+  setSnapBusy(true);
+  setResult($("snapResult"), "muted", "Saving that name…");
+  const res = await renameBackup(entry.id, want).catch((err) => ({
+    ok: false,
+    error: String(err?.message ?? err),
+  }));
+  if (res?.ok) {
+    setResult(
+      $("snapResult"),
+      "ok",
+      want ? `Renamed to “${want}”.` : "Name removed — it goes back to its date.",
+    );
+  } else {
+    setResult(
+      $("snapResult"),
+      "bad",
+      `Could not rename that backup: ${res?.error ?? "unknown error"}.`,
+    );
+  }
+  await renderSnaps();
 }
 
 function button(label, cls, onClick, needsBar) {

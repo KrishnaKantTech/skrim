@@ -165,6 +165,27 @@ async function offerRecoveryOnInstall(reason) {
 }
 
 /**
+ * Take the copy of the bar as it was before Skrim had touched it -- on a fresh
+ * install only, never on an update, where "before Skrim" is already history.
+ *
+ * The engine owns every rule about whether the bar is worth snapshotting right
+ * now; this notes that the profile is owed one and asks once. If the answer is
+ * "not yet" -- a reinstall over bookmarks still parked in a vault is the case
+ * that matters -- the want survives and the watchdog picks it up once recovery
+ * has put the real bar back.
+ */
+async function takeOriginalBackupOnInstall(reason) {
+  if (reason !== "install") return;
+  try {
+    await engine.wantOriginalBackup();
+    const res = await engine.maybeOriginalBackup();
+    console.log("[secureshare] original backup", res);
+  } catch (err) {
+    console.warn("[secureshare] original backup failed", err);
+  }
+}
+
+/**
  * Registration that cannot take the worker down with it.
  *
  * Every listener here is registered at top level because MV3 misses any added
@@ -232,6 +253,13 @@ async function runWatchdog() {
     await engine
       .maybeDailyBackup()
       .catch((e) => console.warn("[secureshare] daily backup failed", e));
+    // And the install-time copy, for the one install that could not take it at
+    // the time: a reinstall over a bar still parked in a vault. Guarded by a
+    // stored timestamp that is zero on every profile that already has one, so
+    // for almost everybody this is a single storage read.
+    await engine
+      .maybeOriginalBackup()
+      .catch((e) => console.warn("[secureshare] original backup failed", e));
     await refreshAction();
     return;
   }
@@ -266,6 +294,7 @@ safely("onInstalled", () =>
       .then((r) => console.log("[secureshare] install recover", details.reason, r))
       .catch((e) => console.error("[secureshare] install recover failed", e))
       .finally(refreshAction)
+      .then(() => takeOriginalBackupOnInstall(details.reason))
       .then(() => offerRecoveryOnInstall(details.reason));
   })
 );
@@ -456,6 +485,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           break;
         case "deleteBackup":
           sendResponse(await engine.deleteBackup(msg.id));
+          break;
+        case "renameBackup":
+          sendResponse(await engine.renameBackup(msg.id, msg.label));
           break;
         case "clearBackups":
           sendResponse(await engine.clearBackups());

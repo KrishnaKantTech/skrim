@@ -265,6 +265,113 @@ const MUTATIONS = [
     }`,
     to: `    /* mutated: no safety copy is no longer a reason to stop */`,
   },
+  // --- the copy taken at install -------------------------------------------
+  {
+    name: "BK-ae  never take a copy of the bar Skrim arrived to",
+    file: "extension/src/sw.js",
+    from: `      .then(() => takeOriginalBackupOnInstall(details.reason))`,
+    to: `      /* mutated: nothing is saved when Skrim is installed */`,
+  },
+  {
+    name: "BK-af  take an 'original' on every update too, long after Skrim arrived",
+    file: "extension/src/sw.js",
+    from: `async function takeOriginalBackupOnInstall(reason) {
+  if (reason !== "install") return;`,
+    to: `async function takeOriginalBackupOnInstall(reason) {
+  void reason;`,
+  },
+  {
+    name: "BK-ag  drop the watchdog retry, so a deferred want is never filled",
+    file: "extension/src/sw.js",
+    from: `    await engine
+      .maybeOriginalBackup()
+      .catch((e) => console.warn("[secureshare] original backup failed", e));`,
+    to: `    /* mutated: a want the install could not fill stays unfilled */`,
+  },
+  {
+    name: "BK-ah  put the original in the automatic bucket, where retention counts it out",
+    file: "extension/src/backups.js",
+    from: `  [Kind.ORIGINAL]: "original",
+  [Kind.PREHIDE]: "auto",`,
+    to: `  [Kind.ORIGINAL]: "auto",
+  [Kind.PREHIDE]: "auto",`,
+  },
+  {
+    name: "BK-ai  leave the original out of usage()'s tally, so the footer counts NaN",
+    file: "extension/src/backups.js",
+    from: `  const counts = { original: 0, auto: 0, manual: 0, safety: 0 };`,
+    to: `  const counts = { auto: 0, manual: 0, safety: 0 };`,
+  },
+  {
+    name: "BK-aj  snapshot a reinstall's bar with the user's bookmarks still in a vault",
+    file: "extension/src/engine.js",
+    from: `    const stranded = await pendingAdoptionsImpl().catch(() => []);
+    if (stranded.length > 0) return { ok: false, stranded: true };`,
+    to: `    /* mutated: a bar someone's bookmarks are missing from will do */`,
+  },
+  {
+    name: "BK-ak  take the original WITHOUT forcing, so an identical daily swallows it",
+    file: "extension/src/engine.js",
+    from: `    const res = await snapshotBarImpl(backups.Kind.ORIGINAL, { at: now, force: true });`,
+    to: `    const res = await snapshotBarImpl(backups.Kind.ORIGINAL, { at: now });`,
+  },
+  {
+    name: "BK-al  never spend the want, so the watchdog takes an original every minute",
+    file: "extension/src/engine.js",
+    from: `    if (res.ok) await backups.setMeta({ originalWantedAt: 0 });
+    return res;`,
+    to: `    return res;`,
+  },
+  {
+    name: "BK-am  let an unfilled want live forever, ready to mislabel a bar months later",
+    file: "extension/src/engine.js",
+    from: `    if (now - wanted > ORIGINAL_WINDOW_MS) {
+      await backups.setMeta({ originalWantedAt: 0 });
+      return { ok: false, expired: true };
+    }`,
+    to: `    /* mutated: a want never expires */`,
+  },
+  // --- renaming a copy ------------------------------------------------------
+  {
+    name: "BK-an  bump the date on a rename, reordering the list under the user",
+    file: "extension/src/backups.js",
+    from: `  index[pos] = { ...index[pos], label: trimmed, bytes };`,
+    to: `  index[pos] = { ...index[pos], label: trimmed, bytes, at: Date.now() };`,
+  },
+  {
+    name: "BK-ao  rename the index entry only, leaving the download file on the old name",
+    file: "extension/src/backups.js",
+    from: `    await chrome.storage.local.set({ [SNAP_PREFIX + id]: next, [INDEX_KEY]: index });`,
+    to: `    await chrome.storage.local.set({ [INDEX_KEY]: index });`,
+  },
+  {
+    name: "BK-ap  leave the entry's old size behind, so the byte budget counts the wrong thing",
+    file: "extension/src/backups.js",
+    from: `  index[pos] = { ...index[pos], label: trimmed, bytes };`,
+    to: `  index[pos] = { ...index[pos], label: trimmed };`,
+  },
+  {
+    name: "BK-aq  let a rename run a name of any length past the 60 a new backup gets",
+    file: "extension/src/backups.js",
+    from: `  const trimmed = String(label ?? "").trim().slice(0, 60);
+  if (trimmed === (index[pos].label ?? "")) {`,
+    to: `  const trimmed = String(label ?? "");
+  if (trimmed === (index[pos].label ?? "")) {`,
+  },
+  {
+    name: "BK-ar  put a tidy name on an entry whose tree is already gone",
+    file: "extension/src/backups.js",
+    from: `  const snap = await get(id);
+  if (!snap) return { ok: false, error: "that backup is missing or damaged" };`,
+    to: `  const snap = (await get(id)) ?? { v: VERSION, at: 0, kind: "manual", groups: [] };`,
+  },
+  {
+    name: "BK-as  accept a rename of an id that is not in the index at all",
+    file: "extension/src/backups.js",
+    from: `  const pos = index.findIndex((e) => e.id === id);
+  if (pos < 0) return { ok: false, error: "no such backup" };`,
+    to: `  const pos = Math.max(0, index.findIndex((e) => e.id === id));`,
+  },
 ];
 
 run(MUTATIONS, { label: "backups", tmpName: "secureshare-mutate-bk" });

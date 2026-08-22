@@ -115,10 +115,50 @@
       .banner b { font-weight: 650; }
 
       .filehint { font-size: 0.82rem; color: var(--faint); margin: 0.6rem 0 0; }
+
       /* These backups live inside the extension, so an uninstall takes them.
-         Said where the list is, not in the footer nobody reads. */
-      .keephint { font-size: 0.85rem; color: var(--muted); margin: 0.6rem 0 0; }
-      .keephint b { color: var(--text); font-weight: 650; }
+         This said nothing anyone read while it was a fourth muted paragraph in
+         a card, so it is a callout now: full-strength type against the muted
+         copy around it, an icon to stop the eye, and a left rule to break the
+         column edge every other block in the page shares.
+
+         Deliberately NOT amber. Amber is `.banner` above, and it means "your
+         bar is hidden RIGHT NOW" -- a state that clears. A permanent notice
+         wearing the same colour would spend that signal. This one is ink: it is
+         always true, so it reads as a fact of the page rather than an alarm. */
+      .keepnote {
+        display: flex;
+        gap: 0.7rem;
+        align-items: flex-start;
+        margin: 0.9rem 0 0;
+        padding: 0.8rem 0.95rem;
+        background: var(--surface-2);
+        border: 1px solid var(--line);
+        border-left: 3px solid var(--muted);
+        border-radius: var(--radius-md);
+        color: var(--text);
+        font-size: 0.875rem;
+        line-height: 1.5;
+      }
+      .keepnote svg {
+        flex: none;
+        width: 17px;
+        height: 17px;
+        margin-top: 0.1rem;
+        color: var(--muted);
+      }
+      .keepnote p { margin: 0; color: inherit; }
+      .keepnote b { font-weight: 650; }
+      /* The control this sentence names, spelled the way the button is. */
+      .keepnote kbd {
+        font: inherit;
+        font-weight: 650;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-sm);
+        padding: 0.02em 0.32em;
+        background: var(--bg);
+        white-space: nowrap;
+      }
       .visually-hidden {
         position: absolute; width: 1px; height: 1px; margin: -1px;
         padding: 0; border: 0; clip: rect(0 0 0 0); overflow: hidden;
@@ -155,8 +195,19 @@
          has only the date, which then has to carry full weight. */
       .snap__name + .snap__when { font-weight: 400; color: var(--muted); font-size: 0.85rem; }
       .snap__meta { display: block; color: var(--faint); font-size: 0.82rem; margin-top: 0.1rem; }
-      .snap__actions { display: flex; gap: 0.4rem; flex: 0 0 auto; }
+      .snap__actions { display: flex; gap: 0.4rem; flex: 0 0 auto; flex-wrap: wrap; }
       .snap__actions button { padding: 0.4rem 0.7rem; font-size: 0.85rem; font-weight: 550; }
+
+      /* Renaming happens in the row. It takes the whole width the date and the
+         buttons shared, because a name is typed and a 6rem field in the gap
+         left over would be a worse place to type one than the dialog this is
+         deliberately not. */
+      .snap__rename {
+        display: flex; gap: 0.5rem; flex: 1 1 100%; flex-wrap: wrap;
+        align-items: center;
+      }
+      .snap__rename .field { flex: 1 1 12rem; min-width: 0; }
+      .snap__rename button { padding: 0.4rem 0.7rem; font-size: 0.85rem; font-weight: 550; }
 
       /* Why the copy was taken, in one word. Deliberately quiet -- it is a
          footnote on the date, not a status. */
@@ -291,11 +342,20 @@
         A copy of your bar is saved right before every hide, and once a day if
         anything changed. Everything stays on this computer.
       </p>
-      <p class="keephint">
-        <b>These live inside Skrim.</b> Uninstalling the extension deletes them.
-        Your bookmarks themselves are never touched by an uninstall &mdash; but to
-        keep a backup, download it as a file first.
-      </p>
+      <div class="keepnote">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 9v4" />
+          <path d="M12 17h.01" />
+          <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+        </svg>
+        <p>
+          <b>These backups live inside Skrim.</b> Uninstalling the extension
+          deletes them. Your bookmarks themselves are never touched &mdash; but to
+          keep a backup, use <kbd>Download</kbd> on any one below to save it to
+          your computer first.
+        </p>
+      </div>
 
       <div class="newname">
         <input

@@ -417,8 +417,17 @@ async function main() {
     check("Q27", snapCount > 0, "the automatic pre-hide snapshot is listed on the page",
       `${snapCount} listed`);
     const firstTag = await B(`return document.querySelector("#snapList .tag")?.textContent ?? "";`);
-    check("Q28", /before hide|manual|daily/.test(firstTag),
+    check("Q28", /before hide|manual|daily|original/.test(firstTag),
       "tagged in plain words, not a raw kind", firstTag);
+    // The copy taken at install. Only a real browser can prove this one: the
+    // profile is wiped at the top of every run, so Chrome fires a genuine
+    // onInstalled("install") and the worker has to have answered it before the
+    // user ever opened this page.
+    const allTags = await B(`
+      return [...document.querySelectorAll("#snapList .tag")].map((t) => t.textContent).join(",");
+    `);
+    check("Q28b", /original/.test(allTags),
+      "the copy taken when Skrim was installed is listed too", allTags);
     const autoOn = await B(`return document.getElementById("autoToggle").checked;`);
     check("Q29", autoOn === true, "automatic backups read as on by default");
 
@@ -434,6 +443,56 @@ async function main() {
     check("Q30", /Saved/i.test(snapMsg), "Back up now saves a copy", snapMsg.trim());
     const named = await B(`return document.querySelector("#snapList .snap__name")?.textContent ?? "";`);
     check("Q31", named === "QA good state", "and the typed name is what the list shows", named);
+
+    // Rename it in the row -- through the real button, the real field and a
+    // real Enter, because the Node suite proves the storage and this is the
+    // half that only a browser can: that the editor opens over the row it was
+    // clicked on and that Enter alone commits it.
+    await B(`
+      const rows = [...document.querySelectorAll("#snapList .snap")];
+      const row = rows.find((r) => r.querySelector(".snap__name")?.textContent === "QA good state");
+      [...row.querySelectorAll("button")].find((b) => b.textContent === "Rename").click();
+    `, { userGesture: true });
+    const editing = await B(`
+      const f = document.querySelector("#snapList .snap__rename .field");
+      return JSON.stringify({ open: !!f, value: f?.value ?? null, focused: document.activeElement === f });
+    `);
+    check("Q31b", JSON.parse(editing).open === true &&
+      JSON.parse(editing).value === "QA good state" &&
+      JSON.parse(editing).focused === true,
+      "Rename opens an editor in the row, focused and carrying the old name", editing);
+    await B(`
+      const f = document.querySelector("#snapList .snap__rename .field");
+      f.value = "QA renamed state";
+      f.form.requestSubmit();
+    `, { userGesture: true });
+    await sleep(900);
+    const renamedTo = await B(`
+      return [...document.querySelectorAll("#snapList .snap__name")].map((n) => n.textContent).join(",");
+    `);
+    check("Q31c", /QA renamed state/.test(renamedTo) && !/QA good state/.test(renamedTo),
+      "and Enter alone commits the new name", renamedTo);
+    // Escape has to be the way out, or the only exit from the editor is a
+    // rename nobody asked for.
+    await B(`
+      const rows = [...document.querySelectorAll("#snapList .snap")];
+      const row = rows.find((r) => r.querySelector(".snap__name")?.textContent === "QA renamed state");
+      [...row.querySelectorAll("button")].find((b) => b.textContent === "Rename").click();
+      const f = document.querySelector("#snapList .snap__rename .field");
+      f.value = "typed then abandoned";
+      f.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    `, { userGesture: true });
+    await sleep(400);
+    const afterEsc = await B(`
+      return JSON.stringify({
+        open: !!document.querySelector("#snapList .snap__rename"),
+        names: [...document.querySelectorAll("#snapList .snap__name")].map((n) => n.textContent).join(","),
+      });
+    `);
+    check("Q31d", JSON.parse(afterEsc).open === false &&
+      /QA renamed state/.test(JSON.parse(afterEsc).names) &&
+      !/abandoned/.test(JSON.parse(afterEsc).names),
+      "Escape closes the editor and keeps the old name", afterEsc);
     // The yardstick for the restore below: the bar exactly as this backup saw
     // it. Not seededSnap -- the import tests above have legitimately added two
     // folders since then.
@@ -492,7 +551,7 @@ async function main() {
     rmSync(downloads, { recursive: true, force: true }); mkdirSync(downloads, { recursive: true });
     await B(`
       const rows = [...document.querySelectorAll("#snapList .snap")];
-      const named = rows.find((r) => r.querySelector(".snap__name")?.textContent === "QA good state");
+      const named = rows.find((r) => r.querySelector(".snap__name")?.textContent === "QA renamed state");
       [...named.querySelectorAll("button")].find((b) => b.textContent === "Download").click();
     `, { userGesture: true });
     let snapFile = null;
@@ -501,7 +560,7 @@ async function main() {
       const f = readdirSync(downloads).find((n) => n.startsWith("skrim-backup-"));
       if (f) snapFile = join(downloads, f);
     }
-    check("Q40", !!snapFile && /skrim-backup-\d{4}-\d{2}-\d{2}-\d{4}-qa-good-state\.html$/.test(snapFile ?? ""),
+    check("Q40", !!snapFile && /skrim-backup-\d{4}-\d{2}-\d{2}-\d{4}-qa-renamed-state\.html$/.test(snapFile ?? ""),
       "a backup downloads under its own name", snapFile ? snapFile.split("/").pop() : "no file");
     if (snapFile) {
       const snapHtml = readFileSync(snapFile, "utf8");
@@ -514,7 +573,7 @@ async function main() {
     const beforeDelete = await B(`return document.querySelectorAll("#snapList .snap").length;`);
     await B(`
       const rows = [...document.querySelectorAll("#snapList .snap")];
-      const named = rows.find((r) => r.querySelector(".snap__name")?.textContent === "QA good state");
+      const named = rows.find((r) => r.querySelector(".snap__name")?.textContent === "QA renamed state");
       [...named.querySelectorAll("button")].find((b) => b.textContent === "Delete").click();
     `, { userGesture: true });
     await sleep(900);

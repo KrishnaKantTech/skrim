@@ -3,8 +3,8 @@
 // Skrim moves your bookmarks. When a move goes wrong -- and one did, on
 // 2026-08-21, stranding 11 of 12 -- the only thing that gets them back is a
 // copy of what the bar looked like beforehand. This file is that copy: taken
-// automatically before every hide and once a day, kept inside the extension,
-// and replayed by engine.js.
+// automatically the moment Skrim is installed, before every hide, and once a
+// day, kept inside the extension, and replayed by engine.js.
 //
 // It deliberately touches NOTHING but chrome.storage.local. No bookmark reads,
 // no DOM, no chrome.bookmarks -- so the whole of the tricky part (dedupe,
@@ -15,7 +15,7 @@
 //
 //   skrim.backups.index -> [{ id, at, kind, count, folders, bytes, hash, label }]
 //   skrim.backup.<id>   -> { v, at, kind, label, groups: [{ syncing, children }] }
-//   skrim.backups.meta  -> { lastAutoAt }
+//   skrim.backups.meta  -> { lastAutoAt, originalWantedAt }
 //
 // The index is separate on purpose: listing twenty backups must not deserialise
 // twenty bookmark trees, which is the difference between a page that opens
@@ -34,6 +34,7 @@ export const VERSION = 1;
  * own quota.
  */
 export const Kind = {
+  ORIGINAL: "original",
   PREHIDE: "prehide",
   DAILY: "daily",
   MANUAL: "manual",
@@ -41,6 +42,11 @@ export const Kind = {
 };
 
 const BUCKET = {
+  // A bucket of its own, holding one. The copy of the bar as it was before
+  // Skrim had touched it is the one snapshot a newer snapshot cannot replace --
+  // "newer" is exactly what it is not for -- so it must not sit in a quota that
+  // a fortnight of ordinary hides will count it out of.
+  [Kind.ORIGINAL]: "original",
   [Kind.PREHIDE]: "auto",
   [Kind.DAILY]: "auto",
   [Kind.MANUAL]: "manual",
@@ -49,6 +55,7 @@ const BUCKET = {
 
 /** Plain words for the UI. Never shown as the raw kind. */
 export const LABELS = {
+  [Kind.ORIGINAL]: "original",
   [Kind.PREHIDE]: "before hide",
   [Kind.DAILY]: "daily",
   [Kind.MANUAL]: "manual",
@@ -60,11 +67,16 @@ export const LABELS = {
 // it was for. The byte budget below is a second, independent ceiling so a
 // pathological bar cannot fill chrome.storage.local (10 MB) and take the
 // journal down with it -- and it too never empties a bucket.
-export const CAPS = { auto: 15, manual: 10, safety: 5 };
+export const CAPS = { original: 1, auto: 15, manual: 10, safety: 5 };
 export const BYTE_BUDGET = 4 * 1024 * 1024;
 /** A single snapshot larger than this is refused rather than stored. */
 export const MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024;
-/** Order the byte budget evicts in. Automatic copies are the cheapest to lose. */
+/**
+ * Order the byte budget evicts in. Automatic copies are the cheapest to lose.
+ * "original" is left out on purpose rather than by oversight: its bucket holds
+ * one, and neither pass ever drops the last of a bucket, so naming it here
+ * would be a line that could not fire.
+ */
 const EVICT_ORDER = ["auto", "safety", "manual"];
 
 // ---------------------------------------------------------------------------
@@ -371,7 +383,7 @@ export function plan(entries) {
   // new entry at the head, and a same-millisecond tie must not reorder it
   // behind the entry it was taken after.
   const sorted = [...entries].sort((a, b) => b.at - a.at);
-  const seen = { auto: 0, manual: 0, safety: 0 };
+  const seen = { original: 0, auto: 0, manual: 0, safety: 0 };
   const kept = [];
   const dropped = [];
   for (const e of sorted) {
@@ -396,6 +408,58 @@ export function plan(entries) {
     if (total <= BYTE_BUDGET) break;
   }
   return { kept, dropped };
+}
+
+/**
+ * Change a snapshot's name, and nothing else about it.
+ *
+ * `at` is deliberately left alone. It is when the copy was TAKEN, and a rename
+ * that bumped it would reorder the list under the user and make a month-old
+ * copy read as this morning's -- which is precisely the fact a backup is
+ * consulted for.
+ *
+ * The label is stored twice, because two different things read it: the index
+ * entry is what the list renders, the blob is what the download file is named
+ * from. So both are written in ONE storage.set. Two writes would let a failure
+ * land between them and leave the list showing one name while the file it hands
+ * you carries another.
+ *
+ * An empty name is not an error -- it is how a rename is undone, and it puts
+ * the row back to the date it had before anyone named it.
+ */
+export async function rename(id, label) {
+  if (typeof id !== "string" || !id) return { ok: false, error: "no such backup" };
+  const index = await list();
+  const pos = index.findIndex((e) => e.id === id);
+  if (pos < 0) return { ok: false, error: "no such backup" };
+
+  // Renaming an entry whose tree is gone would leave a tidy name on something
+  // that can never be restored or downloaded. Say so instead.
+  const snap = await get(id);
+  if (!snap) return { ok: false, error: "that backup is missing or damaged" };
+
+  const trimmed = String(label ?? "").trim().slice(0, 60);
+  if (trimmed === (index[pos].label ?? "")) {
+    return { ok: true, id, entry: index[pos], unchanged: true };
+  }
+
+  const next = { ...snap, label: trimmed };
+  let bytes;
+  try {
+    bytes = JSON.stringify(next).length;
+  } catch {
+    return { ok: false, error: "snapshot could not be serialised" };
+  }
+  // The byte budget is counted off the index, so the entry has to carry the
+  // size it actually is now rather than the size it was under its old name.
+  index[pos] = { ...index[pos], label: trimmed, bytes };
+
+  try {
+    await chrome.storage.local.set({ [SNAP_PREFIX + id]: next, [INDEX_KEY]: index });
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err) };
+  }
+  return { ok: true, id, entry: index[pos] };
 }
 
 /** Delete one snapshot, index entry and blob together. */
@@ -431,7 +495,7 @@ export async function clear() {
 export async function usage() {
   const index = await list();
   const bytes = index.reduce((n, e) => n + (e.bytes ?? 0), 0);
-  const counts = { auto: 0, manual: 0, safety: 0 };
+  const counts = { original: 0, auto: 0, manual: 0, safety: 0 };
   for (const e of index) counts[BUCKET[e.kind] ?? "auto"]++;
   return { total: index.length, bytes, counts, caps: { ...CAPS }, budget: BYTE_BUDGET };
 }

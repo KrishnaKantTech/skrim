@@ -3665,6 +3665,7 @@ async function testBackupRetentionIsPureAndCapped() {
     id: `${kind}-${i}`, at: 1000 + i, kind, bytes, count: 1, hash: `h${i}`, len: i,
   });
   const many = [];
+  many.push(mk(-500, "original"));
   for (let i = 0; i < 40; i++) many.push(mk(i, "prehide"));
   for (let i = 0; i < 6; i++) many.push(mk(i, "daily"));
   for (let i = 0; i < 20; i++) many.push(mk(i, "manual"));
@@ -3675,6 +3676,8 @@ async function testBackupRetentionIsPureAndCapped() {
     byKind("prehide") + byKind("daily") === 15, `${byKind("prehide")}+${byKind("daily")}`);
   check("retention: manual capped at 10", byKind("manual") === 10, String(byKind("manual")));
   check("retention: safety capped at 5", byKind("safety") === 5, String(byKind("safety")));
+  check("retention: the original survives 40 newer automatic copies",
+    byKind("original") === 1, String(byKind("original")));
   check("retention: everything else is dropped", dropped.length === many.length - kept.length);
   check("retention: it keeps the NEWEST of each bucket",
     kept.some((e) => e.id === "manual-19") && !kept.some((e) => e.id === "manual-0"));
@@ -3698,6 +3701,20 @@ async function testBackupRetentionIsPureAndCapped() {
     mixedPlan.kept.some((e) => e.kind === "manual") &&
       mixedPlan.kept.filter((e) => e.kind === "prehide").length === 1,
     JSON.stringify(mixedPlan.kept.map((e) => e.id)));
+
+  // The byte budget is the other way a copy can vanish, and the original has to
+  // be out of reach of that one too -- an oversized bar is exactly the profile
+  // whose original is hardest to replace.
+  const heavy = [
+    mk(9, "manual", backupsMod.BYTE_BUDGET),
+    mk(8, "prehide", backupsMod.BYTE_BUDGET),
+    mk(1, "original", backupsMod.BYTE_BUDGET),
+  ];
+  const heavyPlan = backupsMod.plan(heavy);
+  check("retention: the byte budget cannot evict the original either",
+    heavyPlan.kept.some((e) => e.kind === "original"),
+    JSON.stringify(heavyPlan.kept.map((e) => e.id)));
+
 }
 
 async function testBackupIdsAndFileNames() {
@@ -3860,6 +3877,208 @@ async function testDailyBackupSchedule() {
   check("daily: never while the bar is hidden", whileHidden.hidden === true,
     JSON.stringify(whileHidden));
   await hiddenEngine.restore();
+}
+
+// The copy of the bar as it was BEFORE Skrim had touched it, taken at install.
+// It is the one snapshot a newer snapshot cannot replace: fifteen automatic
+// copies is a fortnight of meetings, and if what went wrong was Skrim, every
+// one of those fifteen has the fault already baked into it.
+async function testOriginalBackupOnInstall() {
+  const mock = build();
+  const { engine } = await loadSw(mock);
+
+  await mock._listeners.onInstalled[0]({ reason: "update" });
+  await flush(engine);
+  await mock.idle(12);
+  check("original: an update takes none -- 'before Skrim' is already history",
+    (await engine.listBackups()).entries.length === 0,
+    JSON.stringify((await engine.listBackups()).entries.map((e) => e.kind)));
+
+  await mock._listeners.onInstalled[0]({ reason: "install" });
+  await flush(engine);
+  await mock.idle(12);
+  const listed = await engine.listBackups();
+  check("original: a fresh install takes one straight away",
+    listed.entries.length === 1 && listed.entries[0].kind === "original",
+    JSON.stringify(listed.entries.map((e) => e.kind)));
+  check("original: of the real bar", listed.entries[0].count === 6,
+    String(listed.entries[0].count));
+  // The page's footer line reads off usage(). A bucket with no slot in that
+  // tally counts to NaN rather than failing loudly.
+  check("original: and the tally has a slot for it, rather than counting to NaN",
+    listed.usage?.counts?.original === 1,
+    JSON.stringify(listed.usage?.counts));
+
+  // The want is spent once it is filled. Otherwise the watchdog, which asks
+  // every minute for the life of the install, would take one every minute.
+  const again = await engine.maybeOriginalBackup();
+  check("original: and only ever one", again.notWanted === true, JSON.stringify(again));
+}
+
+// The install that most needs this copy is the one that cannot take it: a
+// reinstall over bookmarks still parked in a vault. What is on the bar there is
+// the cover story, so the want is held and the watchdog fills it after recovery.
+async function testOriginalBackupWaitsForARescue() {
+  const mock = build();
+  const engine0 = await loadEngine(mock);
+  await engine0.hide({ decoys: true });
+  const vault = findVault(mock);
+  await uninstall(mock);
+
+  const { engine } = await loadSw(mock);
+  await mock._listeners.onInstalled[0]({ reason: "install" });
+  await flush(engine);
+  await mock.idle(12);
+  check("original: a reinstall over a stranded vault records no decoys",
+    (await engine.listBackups()).entries.length === 0,
+    JSON.stringify((await engine.listBackups()).entries.map((e) => e.kind)));
+
+  // The recovery page puts the real bar back. Only now is there something worth
+  // calling the original, and the watchdog is what notices.
+  await engine.adoptVault(vault.id);
+  for (const f of mock._listeners.onAlarm) f({ name: "secureshare.watchdog" });
+  await mock.idle(16);
+  const after = await engine.listBackups();
+  const original = after.entries.find((e) => e.kind === "original");
+  check("original: and is taken once the rescue has run", !!original,
+    JSON.stringify(after.entries.map((e) => e.kind)));
+  check("original: of the bar that came back, not the decoys", original?.count === 6,
+    JSON.stringify(after.entries.map((e) => [e.kind, e.count])));
+  // That same watchdog tick takes the daily copy first, off a bar that is now
+  // byte-identical. Without force the original would fold into it and the
+  // permanent slot this whole path exists to fill would sit empty.
+  check("original: forced past the dedupe, so an identical daily cannot swallow it",
+    after.entries.filter((e) => e.kind === "daily").length === 1 &&
+      after.entries.filter((e) => e.kind === "original").length === 1,
+    JSON.stringify(after.entries.map((e) => e.kind)));
+}
+
+async function testOriginalBackupWantIsBounded() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const t = Date.now();
+
+  const unasked = await engine.maybeOriginalBackup(t);
+  check("original: a profile that never installed fresh is owed nothing",
+    unasked.notWanted === true, JSON.stringify(unasked));
+
+  await engine.wantOriginalBackup(t);
+  const late = await engine.maybeOriginalBackup(t + 8 * 24 * 3600_000);
+  check("original: a want unfilled for over a week expires rather than mislabel a bar",
+    late.expired === true, JSON.stringify(late));
+  const after = await engine.maybeOriginalBackup(t + 8 * 24 * 3600_000 + 60_000);
+  check("original: and stays expired, so the watchdog stops asking",
+    after.notWanted === true, JSON.stringify(after));
+  check("original: with nothing stored", (await engine.listBackups()).entries.length === 0);
+
+  await engine.wantOriginalBackup(t);
+  const inTime = await engine.maybeOriginalBackup(t + 6 * 24 * 3600_000);
+  check("original: six days late is still inside the window",
+    inTime.ok === true, JSON.stringify(inTime));
+
+  // The toggle governs this the way it governs every other automatic copy.
+  const off = build();
+  const offEngine = await loadEngine(off);
+  await offEngine.setSettings({ autoBackup: false });
+  await offEngine.wantOriginalBackup(Date.now());
+  const res = await offEngine.maybeOriginalBackup();
+  check("original: automatic backups off means none at install either",
+    res.off === true, JSON.stringify(res));
+
+  const hiddenMock = build();
+  const hiddenEngine = await loadEngine(hiddenMock);
+  await hiddenEngine.hide({ decoys: true });
+  await hiddenEngine.wantOriginalBackup(Date.now());
+  const whileHidden = await hiddenEngine.maybeOriginalBackup();
+  check("original: never while the bar is hidden", whileHidden.hidden === true,
+    JSON.stringify(whileHidden));
+  await hiddenEngine.restore();
+}
+
+// Renaming a backup. The list is fifteen dates, and the only way to say "that
+// one, the good one" is to be able to write it on the copy.
+async function testRenameBackup() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+
+  // Taken a month ago, explicitly. Renaming it a moment later must leave it
+  // reading a month old -- and with `at` defaulting to now, a rename that bumped
+  // the date would land in the same millisecond as the snapshot and look
+  // innocent.
+  const monthAgo = Date.now() - 30 * 24 * 3600_000;
+  const made = await engine.snapshotBar("manual", { label: "first go", at: monthAgo });
+  const before = (await engine.listBackups()).entries[0];
+
+  const res = await engine.renameBackup(made.id, "  Before the big cleanup  ");
+  check("rename: answers ok", res.ok === true, JSON.stringify(res));
+  const after = (await engine.listBackups()).entries[0];
+  check("rename: the list shows the new name, trimmed",
+    after.label === "Before the big cleanup", JSON.stringify(after.label));
+  check("rename: the date is untouched -- a month-old copy still reads a month old",
+    after.at === monthAgo, `${monthAgo} -> ${after.at}`);
+  check("rename: and so is how the copy was taken", after.kind === before.kind);
+  check("rename: the tree is untouched", after.count === before.count &&
+    after.hash === before.hash, JSON.stringify([after.count, after.hash]));
+  check("rename: the entry carries its new size, which the byte budget counts off",
+    after.bytes !== before.bytes, `${before.bytes} -> ${after.bytes}`);
+
+  // The blob carries the label too, because the download file is named from it
+  // rather than from the index. The two must not drift apart.
+  const file = await engine.backupFile(made.id);
+  check("rename: the download file is named off the blob, so the blob was renamed too",
+    file.name.endsWith("-before-the-big-cleanup.html"), file.name);
+
+  // Clearing the name is how a rename is undone.
+  const cleared = await engine.renameBackup(made.id, "   ");
+  check("rename: an empty name is accepted, not refused", cleared.ok === true,
+    JSON.stringify(cleared));
+  check("rename: and puts the row back to its date",
+    (await engine.listBackups()).entries[0].label === "");
+
+  // The consequence a bumped date would have, said in the terms the page shows
+  // it: newest first, and renaming the old one does not move it to the top.
+  mock.seed("1", { title: "Later", url: "https://later.example/" });
+  const newer = await engine.snapshotBar("manual", { label: "taken today" });
+  await engine.renameBackup(made.id, "named after the fact");
+  const order = (await engine.listBackups()).entries.map((x) => x.id);
+  check("rename: so the renamed copy stays where its date puts it, not at the top",
+    order[0] === newer.id && order[1] === made.id, order.join(","));
+
+  const missing = await engine.renameBackup("no-such-id", "x");
+  check("rename: a backup that is not there says so",
+    missing.ok === false && /no such backup/.test(missing.error ?? ""),
+    JSON.stringify(missing));
+
+  // An index entry whose tree has been lost is not something to put a tidy name
+  // on -- it can be neither restored nor downloaded.
+  mock.storage.delete("skrim.backup." + made.id);
+  const orphan = await engine.renameBackup(made.id, "wishful");
+  check("rename: an entry whose tree is gone is refused rather than tidied",
+    orphan.ok === false && /missing or damaged/.test(orphan.error ?? ""),
+    JSON.stringify(orphan));
+}
+
+// A long name, and the automatic copies. Naming one does not change what it is.
+async function testRenameIsBoundedAndWorksOnAutomaticCopies() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  await engine.conceal();
+  await engine.restore();
+
+  const auto = (await engine.listBackups()).entries.find((e) => e.kind === "prehide");
+  check("rename: there is an automatic copy to name", !!auto);
+  const long = "x".repeat(200);
+  const res = await engine.renameBackup(auto.id, long);
+  check("rename: a 200-character name is cut to the same 60 a new backup gets",
+    res.ok === true && res.entry.label.length === 60, String(res.entry?.label?.length));
+  const listed = (await engine.listBackups()).entries.find((e) => e.id === auto.id);
+  check("rename: an automatic copy keeps its tag -- the name says nothing about how it was taken",
+    listed.kind === "prehide", listed.kind);
+
+  // Renaming must never disturb what a restore would do.
+  const dry = await engine.restoreBackup(auto.id, { dry: true });
+  check("rename: and the copy still restores exactly as it did", dry.ok === true,
+    JSON.stringify(dry).slice(0, 120));
 }
 
 async function testDiffRestoreIsExactAndMovesRatherThanRebuilds() {
@@ -4703,6 +4922,11 @@ await testSnapshotRefusesWhileHidden();
 await testPreHideSnapshot();
 await testAutoBackupOffTakesNothing();
 await testDailyBackupSchedule();
+await testOriginalBackupOnInstall();
+await testOriginalBackupWaitsForARescue();
+await testOriginalBackupWantIsBounded();
+await testRenameBackup();
+await testRenameIsBoundedAndWorksOnAutomaticCopies();
 await testDiffRestoreIsExactAndMovesRatherThanRebuilds();
 await testDiffRestoreUndoesItself();
 await testDiffRestoreRepairsTheIndexBug();

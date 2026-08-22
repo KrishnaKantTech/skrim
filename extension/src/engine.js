@@ -2051,10 +2051,11 @@ export const importTree = (nodes, opts) => serialize(() => importTreeImpl(nodes,
 // Snapshots.
 //
 // The backup page's Download button hands the user a file and hopes they keep
-// it. These are the copies Skrim keeps for itself: one before every hide, one a
-// day, plus whatever the user takes by hand. backups.js owns the storage, the
-// dedupe and the retention; this section owns the two things that need the
-// bookmark tree -- reading it into a snapshot, and putting one back.
+// it. These are the copies Skrim keeps for itself: one the moment Skrim is
+// installed, one before every hide, one a day, plus whatever the user takes by
+// hand. backups.js owns the storage, the dedupe and the retention; this section
+// owns the two things that need the bookmark tree -- reading it into a
+// snapshot, and putting one back.
 //
 // Everything here runs on the same serialize() chain as hide and restore, so a
 // snapshot can never be taken halfway through a hide, and a restore from a
@@ -2155,6 +2156,79 @@ async function maybeDailyBackupImpl(now = Date.now()) {
     if (last <= now && now - last < DAILY_MS) return { ok: false, tooSoon: true };
     const res = await snapshotBarImpl(backups.Kind.DAILY, { at: now });
     if (res.ok || res.hidden !== true) await backups.setMeta({ lastAutoAt: now });
+    return res;
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err) };
+  }
+}
+
+/**
+ * How long after an install the original copy is still worth taking.
+ *
+ * A fresh install takes it within a second of the event, so this window is only
+ * ever spent by the install that CANNOT: a reinstall over bookmarks still
+ * parked in a vault, where the bar on screen is the cover story rather than the
+ * user's. That clears as soon as they go through recovery, which might be a
+ * minute later or might be next weekend -- but a bar first seen a month after
+ * the install is nobody's "original", so the want expires rather than sitting
+ * there forever waiting to mislabel one.
+ */
+const ORIGINAL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Note that this profile is owed its original copy. Called on install only. */
+async function wantOriginalBackupImpl(at = Date.now()) {
+  await backups.setMeta({ originalWantedAt: at });
+  return { ok: true, at };
+}
+
+/**
+ * The bar as it was before Skrim had touched it: taken once, at install, and
+ * then held out of retention's reach for as long as the extension is installed.
+ *
+ * It is the copy that matters most and the one an ordinary quota would lose
+ * first. Fifteen automatic snapshots is a fortnight of meetings, after which
+ * every copy Skrim holds is of a bar Skrim has already been moving around --
+ * and if the thing that went wrong was Skrim, every one of them has the fault
+ * baked in. This one predates all of that.
+ *
+ * Called from the install event and again from the watchdog, because the
+ * install that most needs this copy is the one that cannot take it: a reinstall
+ * over a bar whose bookmarks are still in a vault from before. There what is on
+ * the bar is decoys, saving it would record the cover story as the bookmarks,
+ * and the real bar does not exist again until recovery has run. So the want is
+ * stored and retried rather than dropped on the floor.
+ *
+ * Forced past the dedupe deliberately. A retry can land on a bar byte-identical
+ * to one an earlier daily copy already holds, and folding into that entry would
+ * leave the profile with no snapshot of kind `original` at all -- which is to
+ * say, with nothing in the permanent slot this whole path exists to fill.
+ */
+async function maybeOriginalBackupImpl(now = Date.now()) {
+  try {
+    // The cheap guard first, the same way the daily one does it: on every
+    // profile but the handful still owed a copy, this is one storage read and
+    // out, and the watchdog asks once a minute forever.
+    const m = await backups.meta();
+    const wanted = typeof m.originalWantedAt === "number" ? m.originalWantedAt : 0;
+    if (wanted <= 0) return { ok: false, notWanted: true };
+    // A clock that jumped FORWARD must not expire the want on a profile that
+    // installed minutes ago; one that jumped backwards leaves this negative,
+    // which is simply "not expired yet" and retries, as it should.
+    if (now - wanted > ORIGINAL_WINDOW_MS) {
+      await backups.setMeta({ originalWantedAt: 0 });
+      return { ok: false, expired: true };
+    }
+    const { autoBackup } = await settings.read();
+    if (!autoBackup) return { ok: false, off: true };
+    if (journal.isDisplaced(await journal.read())) return { ok: false, hidden: true };
+    // Bookmarks parked in a vault nobody has adopted: whatever is on the bar
+    // right now, it is not what this profile's bar looks like. Wait for the
+    // recovery page rather than immortalise the wrong tree.
+    const stranded = await pendingAdoptionsImpl().catch(() => []);
+    if (stranded.length > 0) return { ok: false, stranded: true };
+
+    const res = await snapshotBarImpl(backups.Kind.ORIGINAL, { at: now, force: true });
+    if (res.ok) await backups.setMeta({ originalWantedAt: 0 });
     return res;
   } catch (err) {
     return { ok: false, error: String(err?.message ?? err) };
@@ -2647,9 +2721,12 @@ async function backupFileImpl(id) {
 export const snapshotBar = (kind, opts) =>
   serialize(() => snapshotBarImpl(kind ?? backups.Kind.MANUAL, opts));
 export const maybeDailyBackup = (now) => serialize(() => maybeDailyBackupImpl(now));
+export const wantOriginalBackup = (at) => serialize(() => wantOriginalBackupImpl(at));
+export const maybeOriginalBackup = (now) => serialize(() => maybeOriginalBackupImpl(now));
 export const restoreBackup = (id, opts) => serialize(() => restoreBackupImpl(id, opts));
 export const backupFile = (id) => serialize(() => backupFileImpl(id));
 export const deleteBackup = (id) => serialize(() => backups.remove(id));
+export const renameBackup = (id, label) => serialize(() => backups.rename(id, label));
 export const clearBackups = () => serialize(() => backups.clear());
 
 /** The list, plus what the page needs to render it without a second round trip. */
