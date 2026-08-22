@@ -438,8 +438,18 @@ async function main() {
     })()`);
     const lo = JSON.parse(leftovers);
     check("S19", lo.vaults === 0 && lo.other === 0, "no folder, no receipt, no placeholder left behind", JSON.stringify(lo));
-    check("S20", lo.storageKeys.filter((k) => k !== "secureshare.ownedVaults").length === 0,
+    // The journal is the key that must be gone. Backups deliberately outlive a
+    // restore -- that is the entire point of them -- so they are named here
+    // rather than swept up by a blanket "nothing left in storage" assertion.
+    const KEPT_KEYS = (k) =>
+      k === "secureshare.ownedVaults" || k.startsWith("skrim.backup");
+    check("S20", lo.storageKeys.filter((k) => !KEPT_KEYS(k)).length === 0,
       "journal cleared from storage after a verified restore", `keys=[${lo.storageKeys}]`);
+    // And the other half, in a real browser rather than against the mock: the
+    // automatic snapshot taken before the hide is actually on disk afterwards.
+    check("S20b", lo.storageKeys.some((k) => /^skrim\.backup\.\d{8}-\d{6}-prehide$/.test(k)),
+      "the automatic backup taken before the hide survived the whole round trip",
+      `keys=[${lo.storageKeys}]`);
 
     // ------------------------------------------------ the hostile-page checks
     const hostile = await openTab(cdp, `http://127.0.0.1:${PORT}/hostile`);

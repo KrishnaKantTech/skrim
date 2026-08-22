@@ -122,6 +122,16 @@
     <h2>Bookmarks waiting to be put back</h2>
     <div id="vaults"><p class="empty">Looking…</p></div>
 
+    <!-- Only ever shown when there is actually something in it. Someone who has
+         landed on this page has already had something go wrong, and "you may
+         have a backup" would be the cruellest possible thing to say to the
+         reader who does not. -->
+    <div id="backupsBox" hidden>
+      <h2>Backups Skrim kept</h2>
+      <p id="backupsNote"></p>
+      <p><button id="openBackups" class="quiet" type="button">Open backups</button></p>
+    </div>
+
     <h2>If you would rather do it by hand</h2>
     <p>This works with the extension removed, disabled, or broken:</p>
     <ol>

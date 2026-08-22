@@ -402,6 +402,176 @@ async function main() {
 
     // ---- consoles stay clean ------------------------------------------------
     drainPopup(); drainBackup();
+
+    // ---- FEATURE 4: the backups Skrim keeps --------------------------------
+    //
+    // Driven through the shipped UI on purpose. The Node suite proves the diff
+    // itself against a mock; what only a real browser can prove is that the
+    // page's buttons reach the worker, that the <dialog> opens and reports the
+    // numbers the engine actually computed, and that a restore triggered by a
+    // click lands on the real bookmark tree.
+
+    // The hide earlier in this run should already have left a snapshot behind.
+    await B(`await new Promise(r => setTimeout(r, 400));`);
+    const snapCount = await B(`return document.querySelectorAll("#snapList .snap").length;`);
+    check("Q27", snapCount > 0, "the automatic pre-hide snapshot is listed on the page",
+      `${snapCount} listed`);
+    const firstTag = await B(`return document.querySelector("#snapList .tag")?.textContent ?? "";`);
+    check("Q28", /before hide|manual|daily/.test(firstTag),
+      "tagged in plain words, not a raw kind", firstTag);
+    const autoOn = await B(`return document.getElementById("autoToggle").checked;`);
+    check("Q29", autoOn === true, "automatic backups read as on by default");
+
+    // Take one by hand, with a name.
+    await B(`
+      const f = document.getElementById("backupLabel");
+      f.value = "QA good state";
+      f.dispatchEvent(new Event("input", { bubbles: true }));
+      document.getElementById("backupNow").click();
+    `, { userGesture: true });
+    await sleep(900);
+    const snapMsg = await B(`return document.getElementById("snapResult").textContent;`);
+    check("Q30", /Saved/i.test(snapMsg), "Back up now saves a copy", snapMsg.trim());
+    const named = await B(`return document.querySelector("#snapList .snap__name")?.textContent ?? "";`);
+    check("Q31", named === "QA good state", "and the typed name is what the list shows", named);
+    // The yardstick for the restore below: the bar exactly as this backup saw
+    // it. Not seededSnap -- the import tests above have legitimately added two
+    // folders since then.
+    const goodSnap = JSON.stringify(await barSnapshot(cdp, sw));
+
+    // Now wreck the bar behind the page's back, exactly the way a bad restore
+    // would: drag a nested bookmark out onto the top level, and add a stray.
+    const wrecked = await evaluate(cdp, sw, `(async () => {
+      const bar = (await chrome.bookmarks.getSubTree("${BAR_ID}"))[0];
+      const folder = bar.children.find((c) => c.children && c.children.length);
+      await chrome.bookmarks.move(folder.children[0].id, { parentId: "${BAR_ID}", index: 0 });
+      await chrome.bookmarks.create({ parentId: "${BAR_ID}", title: "QA stray", url: "https://stray.qa/" });
+      return (await chrome.bookmarks.getSubTree("${BAR_ID}"))[0].children.map((c) => c.title).join(",");
+    })()`, { awaitPromise: true });
+    check("Q32", /QA stray/.test(wrecked), "the bar is wrong now", wrecked);
+
+    // Reload so the page sees the tree as it is, then ask to put it back.
+    await cdp.send("Page.reload", {}, backup.sessionId);
+    await sleep(1400);
+    await B(`document.querySelector('#snapList .snap button.primary').click();`, { userGesture: true });
+    await sleep(1200);
+    const dialogOpen = await B(`return document.getElementById("confirmDialog").open === true;`);
+    check("Q33", dialogOpen === true, "Put back opens a confirm before it touches anything");
+    const planRows = await B(`
+      return [...document.querySelectorAll("#confirmPlan li")]
+        .map((li) => li.children[0].textContent + "=" + li.children[1].textContent).join(", ");
+    `);
+    check("Q34", /Moved back into place=[1-9]/.test(planRows) && /Deleted=1/.test(planRows),
+      "the confirm shows real counts from a dry run", planRows);
+    const stillWrecked = await evaluate(cdp, sw, `(async () => {
+      const bar = (await chrome.bookmarks.getSubTree("${BAR_ID}"))[0];
+      return bar.children.some((c) => c.title === "QA stray");
+    })()`, { awaitPromise: true });
+    check("Q35", stillWrecked === true, "and the dry run changed nothing at all");
+
+    const beforeRestore = JSON.stringify(await barSnapshot(cdp, sw));
+    await B(`document.getElementById("confirmGo").click();`, { userGesture: true });
+    await sleep(1600);
+    const restoreMsg = await B(`return document.getElementById("snapResult").textContent;`);
+    check("Q36", /back/i.test(restoreMsg) && !/Could not/.test(restoreMsg),
+      "the restore reports what it did", restoreMsg.trim().slice(0, 110));
+    const afterRestore = JSON.stringify(await barSnapshot(cdp, sw));
+    check("Q37", afterRestore !== beforeRestore && !/QA stray/.test(afterRestore),
+      "the stray is gone and the bar changed", afterRestore.slice(0, 90));
+    check("Q38", afterRestore === goodSnap,
+      "and the bar is byte-identical to how it was when the backup was taken",
+      afterRestore.slice(0, 120));
+
+    // The safety copy is the promise that makes the destructive button safe.
+    const safetyTag = await B(`
+      return [...document.querySelectorAll("#snapList .tag")].map((t) => t.textContent).join(",");
+    `);
+    check("Q39", /safety/.test(safetyTag), "a safety copy was taken and is listed", safetyTag);
+
+    // Download one straight out of storage.
+    rmSync(downloads, { recursive: true, force: true }); mkdirSync(downloads, { recursive: true });
+    await B(`
+      const rows = [...document.querySelectorAll("#snapList .snap")];
+      const named = rows.find((r) => r.querySelector(".snap__name")?.textContent === "QA good state");
+      [...named.querySelectorAll("button")].find((b) => b.textContent === "Download").click();
+    `, { userGesture: true });
+    let snapFile = null;
+    for (let i = 0; i < 40 && !snapFile; i++) {
+      await sleep(150);
+      const f = readdirSync(downloads).find((n) => n.startsWith("skrim-backup-"));
+      if (f) snapFile = join(downloads, f);
+    }
+    check("Q40", !!snapFile && /skrim-backup-\d{4}-\d{2}-\d{2}-\d{4}-qa-good-state\.html$/.test(snapFile ?? ""),
+      "a backup downloads under its own name", snapFile ? snapFile.split("/").pop() : "no file");
+    if (snapFile) {
+      const snapHtml = readFileSync(snapFile, "utf8");
+      check("Q41", snapHtml.includes("<!DOCTYPE NETSCAPE-Bookmark-file-1>") &&
+        snapHtml.includes("Acme Corp"),
+        "and it is a real bookmark file any browser can import");
+    }
+
+    // Delete, and the toggle.
+    const beforeDelete = await B(`return document.querySelectorAll("#snapList .snap").length;`);
+    await B(`
+      const rows = [...document.querySelectorAll("#snapList .snap")];
+      const named = rows.find((r) => r.querySelector(".snap__name")?.textContent === "QA good state");
+      [...named.querySelectorAll("button")].find((b) => b.textContent === "Delete").click();
+    `, { userGesture: true });
+    await sleep(900);
+    const afterDelete = await B(`return document.querySelectorAll("#snapList .snap").length;`);
+    check("Q42", afterDelete === beforeDelete - 1, "deleting a backup removes exactly one row",
+      `${beforeDelete} -> ${afterDelete}`);
+
+    await B(`document.getElementById("autoToggle").click();`, { userGesture: true });
+    await sleep(700);
+    const offHint = await B(`return document.getElementById("autoHint").textContent;`);
+    check("Q43", /off/i.test(offHint), "switching automatic backups off says so plainly",
+      offHint.trim().slice(0, 70));
+    const storedOff = await evaluate(cdp, sw, `(async () => {
+      const g = await chrome.storage.local.get("secureshare.settings");
+      return String(g["secureshare.settings"]?.autoBackup);
+    })()`, { awaitPromise: true });
+    check("Q44", storedOff === "false", "and it is actually stored", storedOff);
+
+    // The popup's own switch is a second view over the same setting.
+    await cdp.send("Target.activateTarget", { targetId: popup.targetId });
+    await cdp.send("Page.reload", {}, popup.sessionId);
+    await sleep(1200);
+    await P(`document.getElementById("settings").open = true;
+             document.getElementById("settings").dispatchEvent(new Event("toggle"));`);
+    await sleep(900);
+    const popupSwitch = await P(`return document.getElementById("autoBackupToggle").checked;`);
+    check("Q45", popupSwitch === false,
+      "the popup's switch reflects what the backup page just saved", String(popupSwitch));
+    await P(`document.querySelector('label[for="autoBackupToggle"] .switch__track').click();`,
+      { userGesture: true });
+    await sleep(900);
+    const storedOn = await evaluate(cdp, sw, `(async () => {
+      const g = await chrome.storage.local.get("secureshare.settings");
+      return String(g["secureshare.settings"]?.autoBackup);
+    })()`, { awaitPromise: true });
+    check("Q46", storedOn === "true", "and turning it back on from the popup saves too", storedOn);
+
+    // Rendered, not just asserted. Two switches and a list of rows is exactly
+    // the kind of thing that passes every behavioural check while sitting on
+    // top of itself, so the run leaves a picture behind to look at.
+    const shots = join(SCRATCH, "shots");
+    mkdirSync(shots, { recursive: true });
+    const shot = async (name, target, w, h) => {
+      await cdp.send("Emulation.setDeviceMetricsOverride",
+        { width: w, height: h, deviceScaleFactor: 2, mobile: false }, target.sessionId);
+      await sleep(400);
+      const { data } = await cdp.send("Page.captureScreenshot",
+        { format: "png", captureBeyondViewport: true }, target.sessionId);
+      writeFileSync(join(shots, `${name}.png`), Buffer.from(data, "base64"));
+      await cdp.send("Emulation.clearDeviceMetricsOverride", {}, target.sessionId);
+    };
+    await shot("popup-settings", popup, 360, 760);
+    await cdp.send("Target.activateTarget", { targetId: backup.targetId });
+    await B(`window.scrollTo(0, document.body.scrollHeight);`);
+    await shot("backup-page", backup, 820, 1500);
+    console.log(`  screenshots             : ${shots}`);
+
     check("Q25", popupErr.length === 0, "popup logged no errors or warnings", popupErr.join(" | "));
     check("Q26", backupErr.length === 0, "backup page logged no errors or warnings", backupErr.join(" | "));
 

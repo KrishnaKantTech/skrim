@@ -11,8 +11,10 @@ const MUTATIONS = [
   {
     name: "RC-a  do not write a receipt at all (the pre-fix behaviour)",
     file: "extension/src/engine.js",
-    from: "  for (const entry of entries) {\n    const made = decoysMade.get(entry) ?? [];",
-    to: "  for (const entry of []) {\n    const made = decoysMade.get(entry) ?? [];",
+    // The loop this names has since been folded into one line; the DECISION it
+    // reverts -- write no receipt at all -- is unchanged.
+    from: "  for (const entry of entries) {\n    await syncReceipt(j, entry, decoysMade.get(entry) ?? []);",
+    to: "  for (const entry of []) {\n    await syncReceipt(j, entry, decoysMade.get(entry) ?? []);",
   },
   {
     name: "RC-b  keep the receipt after a completed restore (never clear the vault)",

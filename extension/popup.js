@@ -406,6 +406,28 @@ async function loadSettingsPanel() {
   } catch {
     /* leave the controls at their markup defaults */
   }
+  // Separately, and after: the count is a nicety, and a storage read that will
+  // not answer must not cost the panel its switches.
+  refreshBackupCount();
+}
+
+/**
+ * "3 saved" under the backup row. The popup cannot list backups -- 336px and no
+ * room -- but it can say whether there are any, which is the difference between
+ * a button someone opens out of curiosity and one they open when they need it.
+ */
+async function refreshBackupCount() {
+  let n = null;
+  try {
+    n = (await send("listBackups"))?.entries?.length ?? null;
+  } catch {
+    return; /* leave the markup's own words in place */
+  }
+  if (n === null) return;
+  $("backupHint").textContent =
+    n === 0
+      ? "Keep your own copy, so trying this extension never risks losing them."
+      : `${n} saved on this computer. Open to put one back, download it, or take a new one.`;
 }
 
 // The decoy hint's default copy, restated here for the same reason renderSettings
@@ -447,6 +469,19 @@ function renderSettings(cfg, s) {
     hidden && s?.mode === "tuck"
       ? `Your bar is tucked into “${cfg?.tuckName ?? "a folder"}”. It comes back out the moment you restore.`
       : "When you hide, park the bar inside one folder that stays put instead of clearing it — so your other synced computers keep their bookmarks.";
+
+  if (cfg && typeof cfg.autoBackup === "boolean") {
+    $("autoBackupToggle").checked = cfg.autoBackup;
+    // Off is the state worth explaining, because nothing on screen would
+    // otherwise say what stopped happening.
+    $("autoBackupHint").textContent = cfg.autoBackup
+      ? "Save a copy of your bar before every hide, and once a day. Kept on this computer only."
+      : "Off — nothing is saved before a hide. Backups already taken are kept.";
+  }
+  // Snapshots are refused while the bar is hidden (they would capture the
+  // placeholder links), but the SETTING is just a preference for the next hide,
+  // so it stays editable exactly like the other two.
+  $("autoBackupToggle").disabled = false;
 
   // Only the backup copy actually needs a visible bar; keep its lock and note.
   $("copyBtn").disabled = hidden;
@@ -541,6 +576,13 @@ async function saveSetting(patch, { lock = true } = {}) {
 }
 
 $("decoyToggle").onchange = (e) => saveSetting({ decoys: !!e.currentTarget.checked });
+
+// No live half to this one -- it governs the NEXT hide, never the running one --
+// so it does not go through saveSetting's lock, which exists for the conversions.
+$("autoBackupToggle").onchange = (e) =>
+  saveSetting({ autoBackup: !!e.currentTarget.checked }, { lock: false }).then(
+    refreshBackupCount,
+  );
 
 // Greys the placeholder-links control, which does not apply while tucking, live
 // before the round trip -- the switch itself may take a moment when it is

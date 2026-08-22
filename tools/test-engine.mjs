@@ -3596,6 +3596,967 @@ async function testPortableToleratesMalformedInput() {
 
 // --------------------------------------------------------------------------
 
+// --- backups: snapshots and the diff restore -------------------------------
+//
+// The headline here is the diff. A restore that deleted the bar and rebuilt it
+// would pass a "tree is identical" check while resetting every bookmark's id
+// and date and firing a delete plus a create at every other signed-in computer.
+// So these tests assert the tree AND the ids: a restore that moved is a
+// different thing from a restore that looked the same afterwards.
+
+const backupsMod = await import(`file://${path.join(BUILD, "backups.js")}`);
+
+/** id -> url|folder-title, so a restore can be checked for identity survival. */
+function idMap(mock, rootId = "1") {
+  const out = new Map();
+  const walk = (id) => {
+    for (const c of mock.nodes.get(id)?.children ?? []) {
+      const n = mock.nodes.get(c);
+      out.set(c, n.url ?? `folder:${n.title}`);
+      if (n.url === undefined) walk(c);
+    }
+  };
+  walk(rootId);
+  return out;
+}
+
+function urlsUnder(mock, rootId = "1") {
+  const out = [];
+  const walk = (id) => {
+    for (const c of mock.nodes.get(id)?.children ?? []) {
+      const n = mock.nodes.get(c);
+      if (n.url !== undefined) out.push(n.url);
+      else walk(c);
+    }
+  };
+  walk(rootId);
+  return out.sort();
+}
+
+/** Add the second (account) bar/other pair Chrome's split storage produces. */
+function addSecondStorage(mock) {
+  mock._mk("90", "0", "Bookmarks bar", { folderType: "bookmarks-bar", syncing: false });
+  mock._mk("91", "0", "Other bookmarks", { folderType: "other", syncing: false });
+  return { bar: "90", other: "91" };
+}
+
+async function testBackupRetentionIsPureAndCapped() {
+  const mk = (i, kind, bytes = 100) => ({
+    id: `${kind}-${i}`, at: 1000 + i, kind, bytes, count: 1, hash: `h${i}`, len: i,
+  });
+  const many = [];
+  for (let i = 0; i < 40; i++) many.push(mk(i, "prehide"));
+  for (let i = 0; i < 6; i++) many.push(mk(i, "daily"));
+  for (let i = 0; i < 20; i++) many.push(mk(i, "manual"));
+  for (let i = 0; i < 9; i++) many.push(mk(i, "safety"));
+  const { kept, dropped } = backupsMod.plan(many);
+  const byKind = (k) => kept.filter((e) => e.kind === k).length;
+  check("retention: before-hide and daily share one bucket of 15",
+    byKind("prehide") + byKind("daily") === 15, `${byKind("prehide")}+${byKind("daily")}`);
+  check("retention: manual capped at 10", byKind("manual") === 10, String(byKind("manual")));
+  check("retention: safety capped at 5", byKind("safety") === 5, String(byKind("safety")));
+  check("retention: everything else is dropped", dropped.length === many.length - kept.length);
+  check("retention: it keeps the NEWEST of each bucket",
+    kept.some((e) => e.id === "manual-19") && !kept.some((e) => e.id === "manual-0"));
+
+  // Byte budget: one bucket of oversized entries must still leave one standing.
+  const fat = [];
+  for (let i = 0; i < 5; i++) fat.push(mk(i, "manual", backupsMod.BYTE_BUDGET));
+  const fatPlan = backupsMod.plan(fat);
+  check("retention: the byte budget never empties a bucket",
+    fatPlan.kept.length === 1 && fatPlan.kept[0].id === "manual-4",
+    JSON.stringify(fatPlan.kept.map((e) => e.id)));
+
+  // Automatic copies are evicted before manual ones.
+  const mixed = [
+    mk(9, "manual", backupsMod.BYTE_BUDGET),
+    mk(8, "prehide", backupsMod.BYTE_BUDGET),
+    mk(7, "prehide", backupsMod.BYTE_BUDGET),
+  ];
+  const mixedPlan = backupsMod.plan(mixed);
+  check("retention: automatic copies go before manual ones",
+    mixedPlan.kept.some((e) => e.kind === "manual") &&
+      mixedPlan.kept.filter((e) => e.kind === "prehide").length === 1,
+    JSON.stringify(mixedPlan.kept.map((e) => e.id)));
+}
+
+async function testBackupIdsAndFileNames() {
+  const at = new Date(2026, 7, 21, 18, 40, 32).getTime();
+  const id = backupsMod.makeId(at, "prehide");
+  check("names: the id is local date, time and kind", id === "20260821-184032-prehide", id);
+  const taken = new Set([id]);
+  check("names: a same-second collision gets a suffix",
+    backupsMod.makeId(at, "prehide", taken) === "20260821-184032-prehide-2");
+  check("names: the download file reads in plain words",
+    backupsMod.fileNameFor({ at, kind: "prehide" }) ===
+      "skrim-backup-2026-08-21-1840-before-hide.html",
+    backupsMod.fileNameFor({ at, kind: "prehide" }));
+  check("names: a typed name becomes the file name",
+    backupsMod.fileNameFor({ at, kind: "manual", label: "Before the BIG cleanup!" }) ===
+      "skrim-backup-2026-08-21-1840-before-the-big-cleanup.html",
+    backupsMod.fileNameFor({ at, kind: "manual", label: "Before the BIG cleanup!" }));
+  check("names: a name of pure punctuation still yields a usable file name",
+    backupsMod.fileNameFor({ at, kind: "manual", label: "!!!" }) ===
+      "skrim-backup-2026-08-21-1840-manual.html",
+    backupsMod.fileNameFor({ at, kind: "manual", label: "!!!" }));
+
+  // The fingerprint has to separate trees that differ ONLY by nesting, or a
+  // reorganised bar would be mistaken for an unchanged one and never backed up.
+  const flat = [{ syncing: true, children: [
+    { title: "A", url: "https://a/" }, { title: "F", children: [] } ] }];
+  const nested = [{ syncing: true, children: [
+    { title: "F", children: [{ title: "A", url: "https://a/" }] } ] }];
+  check("fingerprint: nesting changes the hash",
+    backupsMod.fingerprint(flat).hash !== backupsMod.fingerprint(nested).hash);
+  check("fingerprint: order changes the hash",
+    backupsMod.fingerprint([{ syncing: true, children: [
+      { title: "A", url: "https://a/" }, { title: "B", url: "https://b/" }] }]).hash !==
+    backupsMod.fingerprint([{ syncing: true, children: [
+      { title: "B", url: "https://b/" }, { title: "A", url: "https://a/" }] }]).hash);
+  check("fingerprint: the same tree twice is the same hash",
+    backupsMod.fingerprint(flat).hash === backupsMod.fingerprint(flat).hash);
+}
+
+async function testSnapshotAndDedupe() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+
+  const first = await engine.snapshotBar("manual", { label: "first" });
+  check("snapshot: saves and reports an id", first.ok === true && !!first.id, JSON.stringify(first));
+
+  const listed = await engine.listBackups();
+  check("snapshot: appears in the list", listed.entries.length === 1, JSON.stringify(listed.entries));
+  check("snapshot: with the bar's link count", listed.entries[0].count === 6,
+    String(listed.entries[0].count));
+  check("snapshot: and its folder count", listed.entries[0].folders === 4,
+    String(listed.entries[0].folders));
+  check("snapshot: automatic backups are on by default", listed.autoBackup === true);
+
+  const again = await engine.snapshotBar("daily");
+  check("snapshot: an unchanged bar does not make a second copy",
+    again.ok === true && again.deduped === true, JSON.stringify(again));
+  check("snapshot: so the list still holds one", (await engine.listBackups()).entries.length === 1);
+
+  mock.seed("1", { title: "New", url: "https://new.example/" });
+  const third = await engine.snapshotBar("daily");
+  check("snapshot: a changed bar does make one", third.ok === true && third.deduped === false);
+  const after = await engine.listBackups();
+  check("snapshot: newest first", after.entries.length === 2 && after.entries[0].count === 7,
+    JSON.stringify(after.entries.map((e) => e.count)));
+
+  // A forced copy is what the safety snapshot relies on.
+  const forced = await engine.snapshotBar("safety", { force: true });
+  check("snapshot: force takes a copy even of an unchanged bar",
+    forced.ok === true && forced.deduped === false);
+}
+
+async function testSnapshotRefusesWhileHidden() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  await engine.hide({ decoys: true });
+  const res = await engine.snapshotBar("manual");
+  check("snapshot: refuses while hidden rather than saving the decoys",
+    res.ok === false && res.hidden === true, JSON.stringify(res));
+  check("snapshot: and stores nothing", (await engine.listBackups()).entries.length === 0);
+  await engine.restore();
+}
+
+async function testPreHideSnapshot() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  await engine.conceal();
+  await engine.restore();
+  const listed = await engine.listBackups();
+  check("pre-hide: conceal takes a snapshot before it moves anything",
+    listed.entries.length === 1 && listed.entries[0].kind === "prehide",
+    JSON.stringify(listed.entries.map((e) => e.kind)));
+  check("pre-hide: of the real bar, not the decoys", listed.entries[0].count === 6,
+    String(listed.entries[0].count));
+
+  // Tuck mode is the other hide, and it goes through the same door.
+  const mock2 = build();
+  const engine2 = await loadEngine(mock2);
+  await engine2.setSettings({ tuckMode: true });
+  await engine2.conceal();
+  await engine2.restore();
+  check("pre-hide: a tuck hide is covered too",
+    (await engine2.listBackups()).entries[0]?.kind === "prehide");
+}
+
+async function testAutoBackupOffTakesNothing() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  await engine.setSettings({ autoBackup: false });
+  await engine.conceal();
+  await engine.restore();
+  check("toggle: off means no snapshot before a hide",
+    (await engine.listBackups()).entries.length === 0);
+  const daily = await engine.maybeDailyBackup();
+  check("toggle: off means no daily snapshot", daily.off === true, JSON.stringify(daily));
+
+  // But a backup asked for by hand still works -- the toggle governs the
+  // automatic ones only, which is what the panel says it does.
+  const manual = await engine.snapshotBar("manual", { label: "by hand" });
+  check("toggle: off does not disable Back up now", manual.ok === true);
+  await engine.setSettings({ autoBackup: true });
+  check("toggle: survives a round trip",
+    (await engine.getSettings()).autoBackup === true);
+}
+
+async function testDailyBackupSchedule() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const t = Date.now();
+
+  const first = await engine.maybeDailyBackup(t);
+  check("daily: the first tick takes one", first.ok === true, JSON.stringify(first));
+  const soon = await engine.maybeDailyBackup(t + 60_000);
+  check("daily: a minute later it does not", soon.tooSoon === true, JSON.stringify(soon));
+  const almost = await engine.maybeDailyBackup(t + 23 * 3600_000);
+  check("daily: 23 hours later it still does not", almost.tooSoon === true);
+
+  mock.seed("1", { title: "Tomorrow", url: "https://t.example/" });
+  const next = await engine.maybeDailyBackup(t + 25 * 3600_000);
+  check("daily: a day later it does", next.ok === true && next.deduped === false,
+    JSON.stringify(next));
+
+  // An unchanged bar the next day costs one read and stores nothing new, and
+  // must NOT then retry every minute for the rest of the day.
+  const same = await engine.maybeDailyBackup(t + 50 * 3600_000);
+  check("daily: an unchanged bar dedupes", same.deduped === true, JSON.stringify(same));
+  const afterSame = await engine.maybeDailyBackup(t + 50 * 3600_000 + 60_000);
+  check("daily: and the clock still advanced, so it waits another day",
+    afterSame.tooSoon === true, JSON.stringify(afterSame));
+
+  // A clock that jumps backwards must not park the next one days ahead.
+  const back = await engine.maybeDailyBackup(t - 10 * 24 * 3600_000);
+  check("daily: a backwards clock jump does not strand the schedule",
+    back.tooSoon !== true, JSON.stringify(back));
+
+  const hiddenMock = build();
+  const hiddenEngine = await loadEngine(hiddenMock);
+  await hiddenEngine.hide({ decoys: true });
+  const whileHidden = await hiddenEngine.maybeDailyBackup(Date.now());
+  check("daily: never while the bar is hidden", whileHidden.hidden === true,
+    JSON.stringify(whileHidden));
+  await hiddenEngine.restore();
+}
+
+async function testDiffRestoreIsExactAndMovesRatherThanRebuilds() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const before = JSON.stringify(mock.snapshot("1"));
+  const idsBefore = idMap(mock);
+  const datesBefore = new Map([...idsBefore.keys()].map((id) => [id, mock.nodes.get(id).dateAdded]));
+
+  const snap = await engine.snapshotBar("manual", { label: "good state" });
+  check("diff: a snapshot to restore from", snap.ok === true);
+
+  // Wreck the bar the way a person would: reorder the top level, drag a
+  // bookmark into the wrong folder, rename one, delete one, add a stray.
+  const bar = mock.nodes.get("1");
+  bar.children.push(bar.children.shift());                       // Work -> the end
+  const projectX = [...mock.nodes.values()].find((n) => n.url === "https://x.example/");
+  await mock.api.bookmarks.move(projectX.id, { parentId: "1" }); // out of Personal
+  const headlines = [...mock.nodes.values()].find((n) => n.url === "https://n.example/");
+  await mock.api.bookmarks.update(headlines.id, { title: "RENAMED" });
+  const reading = [...mock.nodes.values()].find((n) => n.url === "https://r.example/");
+  await mock.api.bookmarks.removeTree(reading.id);
+  mock.seed("1", { title: "Stray", url: "https://stray.example/" });
+
+  check("diff: the bar really is wrong now",
+    JSON.stringify(mock.snapshot("1")) !== before);
+
+  const dry = await engine.restoreBackup(snap.id, { dry: true });
+  check("diff: a dry run changes nothing",
+    JSON.stringify(mock.snapshot("1")) !== before && dry.ok === true);
+  check("diff: and takes no safety copy of its own", dry.safetyId == null);
+  const listBeforeReal = (await engine.listBackups()).entries.length;
+
+  const res = await engine.restoreBackup(snap.id);
+  check("diff: restore reports ok", res.ok === true, JSON.stringify(res));
+  check("diff: the bar is byte-identical to the snapshot",
+    JSON.stringify(mock.snapshot("1")) === before,
+    JSON.stringify(mock.snapshot("1")));
+  check("diff: the dry run predicted the real run exactly",
+    JSON.stringify(dry.stats) === JSON.stringify(res.stats),
+    `${JSON.stringify(dry.stats)} vs ${JSON.stringify(res.stats)}`);
+
+  // The whole point: identity survives. Only the one genuinely deleted
+  // bookmark is a new node; everything else is the SAME bookmark, moved.
+  const idsAfter = idMap(mock);
+  let survived = 0;
+  let recreated = 0;
+  for (const [id, what] of idsAfter) {
+    if (idsBefore.has(id) && idsBefore.get(id) === what) survived++;
+    else recreated++;
+  }
+  check("diff: every bookmark that still existed kept its id",
+    survived === idsBefore.size - 1 && recreated === 1,
+    `survived ${survived} of ${idsBefore.size}, recreated ${recreated}`);
+  check("diff: and kept its original date",
+    [...idsAfter.keys()].every(
+      (id) => !datesBefore.has(id) || mock.nodes.get(id).dateAdded === datesBefore.get(id)),
+  );
+  check("diff: it created exactly the one that was deleted",
+    res.stats.created === 1, JSON.stringify(res.stats));
+  check("diff: and deleted exactly the one stray",
+    res.stats.removed === 1, JSON.stringify(res.stats));
+  check("diff: and put the renamed one's title back",
+    res.stats.renamed === 1, JSON.stringify(res.stats));
+  check("diff: nothing failed", res.stats.failed === 0, JSON.stringify(res.stats));
+
+  check("diff: a safety copy was taken first",
+    !!res.safetyId && (await engine.listBackups()).entries.length === listBeforeReal + 1);
+  const safety = (await engine.listBackups()).entries.find((e) => e.id === res.safetyId);
+  check("diff: tagged as a safety copy", safety?.kind === "safety", JSON.stringify(safety));
+}
+
+async function testDiffRestoreUndoesItself() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const original = JSON.stringify(mock.snapshot("1"));
+  const good = await engine.snapshotBar("manual");
+
+  mock.seed("1", { title: "Later", url: "https://later.example/" });
+  mock.seed("1", { title: "Later 2", url: "https://later2.example/" });
+  const messy = JSON.stringify(mock.snapshot("1"));
+
+  const res = await engine.restoreBackup(good.id);
+  check("undo: the restore did its job", JSON.stringify(mock.snapshot("1")) === original);
+
+  const undo = await engine.restoreBackup(res.safetyId);
+  check("undo: restoring the safety copy puts the bar back as it was",
+    undo.ok === true && JSON.stringify(mock.snapshot("1")) === messy,
+    JSON.stringify(mock.snapshot("1")));
+}
+
+async function testDiffRestoreRepairsTheIndexBug() {
+  // 2026-08-21: a restore stranded 11 of 12 bookmarks by predicting the bar's
+  // length. This is that shape -- everything present, everything in the wrong
+  // place -- and a diff restore should fix it with MOVES ALONE.
+  const mock = new MockChrome();
+  mock.seed("1", { title: "Work", children: [
+    { title: "A", url: "https://a/" }, { title: "B", url: "https://b/" } ] });
+  mock.seed("1", { title: "Home", children: [
+    { title: "C", url: "https://c/" }, { title: "D", url: "https://d/" } ] });
+  mock.seed("1", { title: "E", url: "https://e/" });
+  const engine = await loadEngine(mock);
+  const before = JSON.stringify(mock.snapshot("1"));
+  const idsBefore = idMap(mock);
+  const snap = await engine.snapshotBar("manual");
+
+  // Scatter: pull every link out of its folder onto the bar, backwards.
+  const work = [...mock.nodes.values()].find((n) => n.title === "Work");
+  const home = [...mock.nodes.values()].find((n) => n.title === "Home");
+  for (const url of ["https://a/", "https://b/", "https://c/", "https://d/"]) {
+    const n = [...mock.nodes.values()].find((x) => x.url === url);
+    await mock.api.bookmarks.move(n.id, { parentId: "1", index: 0 });
+  }
+  check("index bug: the bar is scattered",
+    mock.nodes.get("1").children.length === 7 &&
+      mock.nodes.get(work.id).children.length === 0 &&
+      mock.nodes.get(home.id).children.length === 0);
+
+  const res = await engine.restoreBackup(snap.id);
+  check("index bug: the bar is exactly back", JSON.stringify(mock.snapshot("1")) === before,
+    JSON.stringify(mock.snapshot("1")));
+  check("index bug: fixed with moves alone -- nothing created, nothing deleted",
+    res.stats.created === 0 && res.stats.removed === 0 && res.stats.removedFolders === 0,
+    JSON.stringify(res.stats));
+  check("index bug: every bookmark kept its id",
+    [...idMap(mock).keys()].every((id) => idsBefore.has(id)));
+}
+
+async function testDiffRestoreNeverMovesAFolderIntoItself() {
+  // bar -> X -> Y -> Z restored as bar -> Z -> Y -> X. Every folder ends up
+  // inside one it currently contains, which is the shape that would throw
+  // "Can't move a folder into itself" if placement were not breadth-first.
+  const mock = new MockChrome();
+  mock.seed("1", { title: "X", children: [
+    { title: "Y", children: [{ title: "Z", children: [{ title: "L", url: "https://l/" }] }] } ] });
+  const engine = await loadEngine(mock);
+
+  // Snapshot the INVERTED shape by building it, saving, then putting it back.
+  const inverted = [{ syncing: true, children: [
+    { title: "Z", children: [
+      { title: "Y", children: [
+        { title: "X", children: [{ title: "L", url: "https://l/" }] } ] } ] } ] }];
+  const put = await backupsMod.put(inverted, "manual", { label: "inverted" });
+  check("cycles: the inverted snapshot stored", put.ok === true, JSON.stringify(put));
+
+  const res = await engine.restoreBackup(put.id);
+  check("cycles: a full folder inversion restores without an error",
+    res.ok === true && res.stats.failed === 0, JSON.stringify(res));
+  const shape = mock.snapshot("1");
+  check("cycles: and lands in the inverted shape",
+    shape.c[0].t === "Z" && shape.c[0].c[0].t === "Y" && shape.c[0].c[0].c[0].t === "X" &&
+      shape.c[0].c[0].c[0].c[0].u === "https://l/",
+    JSON.stringify(shape));
+  check("cycles: with folders moved, not remade",
+    res.stats.created === 0 && res.stats.removed === 0, JSON.stringify(res.stats));
+}
+
+async function testDiffRestoreLeavesPolicyBookmarksAlone() {
+  const mock = new MockChrome();
+  mock.seed("1", { title: "Company", unmodifiable: "managed", children: [
+    { title: "Intranet", url: "https://intranet/" } ] });
+  mock.seed("1", { title: "Mine", url: "https://mine/" });
+  const engine = await loadEngine(mock);
+  const snap = await engine.snapshotBar("manual");
+
+  const entry = (await engine.listBackups()).entries[0];
+  check("policy: a managed bookmark is not recorded in the snapshot",
+    entry.count === 1, String(entry.count));
+
+  mock.seed("1", { title: "Extra", url: "https://extra/" });
+  const res = await engine.restoreBackup(snap.id);
+  check("policy: the restore succeeds", res.ok === true && res.stats.failed === 0,
+    JSON.stringify(res));
+  const titles = mock.nodes.get("1").children.map((c) => mock.nodes.get(c).title);
+  check("policy: the managed folder is still there", titles.includes("Company"), titles.join(","));
+  check("policy: with its contents", mock.nodes.get(
+    mock.nodes.get("1").children.find((c) => mock.nodes.get(c).title === "Company"),
+  ).children.length === 1);
+  check("policy: the stray was still cleaned up", !titles.includes("Extra"), titles.join(","));
+  check("policy: and the real bookmark is back", titles.includes("Mine"), titles.join(","));
+}
+
+async function testRestoreAsAFolderIsAdditive() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const snap = await engine.snapshotBar("manual", { label: "keepsake" });
+  const before = JSON.stringify(mock.snapshot("1"));
+  const barLen = mock.nodes.get("1").children.length;
+
+  const res = await engine.restoreBackup(snap.id, { mode: "folder" });
+  check("folder mode: reports what it added", res.ok === true && res.created === 6,
+    JSON.stringify(res));
+  check("folder mode: adds exactly one folder",
+    mock.nodes.get("1").children.length === barLen + 1);
+  check("folder mode: named after the backup",
+    /^Backup — /.test(mock.nodes.get(mock.nodes.get("1").children[barLen]).title),
+    mock.nodes.get(mock.nodes.get("1").children[barLen]).title);
+  const originals = mock.nodes.get("1").children.slice(0, barLen).map((c) => mock.snapshot(c));
+  check("folder mode: deletes nothing and reorders nothing",
+    JSON.stringify(originals) === JSON.stringify(JSON.parse(before).c));
+  check("folder mode: takes no safety copy, because it destroys nothing",
+    (await engine.listBackups()).entries.length === 1);
+}
+
+async function testRestoreRefusesWhileHidden() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const snap = await engine.snapshotBar("manual");
+  await engine.hide({ decoys: true });
+  const before = JSON.stringify(mock.snapshot("0"));
+  const diff = await engine.restoreBackup(snap.id);
+  check("restore: refuses the diff while the bar is hidden",
+    diff.ok === false && diff.hidden === true, JSON.stringify(diff));
+  const folder = await engine.restoreBackup(snap.id, { mode: "folder" });
+  check("restore: refuses the folder mode too",
+    folder.ok === false && folder.hidden === true, JSON.stringify(folder));
+  check("restore: a refusal changes nothing at all",
+    JSON.stringify(mock.snapshot("0")) === before);
+  await engine.restore();
+}
+
+async function testSplitStorageBarsNeverCross() {
+  const mock = build();
+  const second = addSecondStorage(mock);
+  mock.seed(second.bar, { title: "Account link", url: "https://account/" });
+  const engine = await loadEngine(mock);
+
+  const snap = await engine.snapshotBar("manual");
+  const stored = await backupsMod.get(snap.id);
+  check("split: the snapshot keeps the two bars apart",
+    stored.groups.length === 2, JSON.stringify(stored.groups.map((g) => g.syncing)));
+  check("split: tagged by which storage they came from",
+    stored.groups.some((g) => g.syncing === true) && stored.groups.some((g) => g.syncing === false));
+
+  const localBefore = JSON.stringify(mock.snapshot("1"));
+  const acctBefore = JSON.stringify(mock.snapshot(second.bar));
+  mock.seed("1", { title: "Local stray", url: "https://ls/" });
+  mock.seed(second.bar, { title: "Account stray", url: "https://as/" });
+
+  const res = await engine.restoreBackup(snap.id);
+  check("split: both bars restore", res.ok === true, JSON.stringify(res));
+  check("split: the local bar is exact", JSON.stringify(mock.snapshot("1")) === localBefore);
+  check("split: the account bar is exact",
+    JSON.stringify(mock.snapshot(second.bar)) === acctBefore,
+    JSON.stringify(mock.snapshot(second.bar)));
+  check("split: no account bookmark landed in local storage",
+    !urlsUnder(mock, "1").includes("https://account/"), urlsUnder(mock, "1").join(","));
+
+  // A bar the backup says nothing about must be LEFT ALONE, never emptied.
+  const single = [{ syncing: true, children: [{ title: "Only", url: "https://only/" }] }];
+  const onlyLocal = await backupsMod.put(single, "manual", { label: "local only" });
+  const acctNow = JSON.stringify(mock.snapshot(second.bar));
+  const res2 = await engine.restoreBackup(onlyLocal.id);
+  check("split: a bar the backup has nothing for is untouched",
+    res2.ok === true && JSON.stringify(mock.snapshot(second.bar)) === acctNow,
+    JSON.stringify(res2));
+  check("split: and the restore says it skipped one", res2.skippedBars >= 1,
+    JSON.stringify(res2));
+}
+
+async function testSignedOutProfileStillRestores() {
+  // The flag on the one bar changed because the user signed in or out. One bar
+  // then, one bar now: pair them anyway, or the backup is stranded.
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const before = JSON.stringify(mock.snapshot("1"));
+  const snap = await backupsMod.put(
+    [{ syncing: false, children: backupsMod.flatten(
+      (await backupsMod.get((await engine.snapshotBar("manual")).id)).groups) }],
+    "manual", { label: "from a signed-out day", force: true },
+  );
+  mock.seed("1", { title: "Stray", url: "https://stray/" });
+  const res = await engine.restoreBackup(snap.id);
+  check("sign-in: a backup whose sync flag flipped still restores",
+    res.ok === true && JSON.stringify(mock.snapshot("1")) === before, JSON.stringify(res));
+}
+
+async function testDuplicateUrlsStayWhereTheyBelong() {
+  const mock = new MockChrome();
+  mock.seed("1", { title: "One", children: [{ title: "Same", url: "https://same/" }] });
+  mock.seed("1", { title: "Two", children: [{ title: "Same", url: "https://same/" }] });
+  mock.seed("1", { title: "Three", children: [{ title: "Same", url: "https://same/" }] });
+  const engine = await loadEngine(mock);
+  const before = JSON.stringify(mock.snapshot("1"));
+  const ids = idMap(mock);
+  const snap = await engine.snapshotBar("manual");
+
+  mock.seed("1", { title: "Stray", url: "https://stray/" });
+  const res = await engine.restoreBackup(snap.id);
+  check("duplicates: three copies of one URL each stay in their own folder",
+    JSON.stringify(mock.snapshot("1")) === before, JSON.stringify(mock.snapshot("1")));
+  check("duplicates: and none of them was shuffled between folders",
+    res.stats.moved === 0 && res.stats.created === 0, JSON.stringify(res.stats));
+  check("duplicates: every id survived", [...idMap(mock).keys()].every((id) => ids.has(id)));
+}
+
+async function testEmptyBarRestores() {
+  const mock = new MockChrome();
+  const engine = await loadEngine(mock);
+  const snapEmpty = await engine.snapshotBar("manual", { label: "empty" });
+  check("empty: a bar with nothing on it can still be snapshotted",
+    snapEmpty.ok === true, JSON.stringify(snapEmpty));
+
+  mock.seed("1", { title: "A", url: "https://a/" });
+  mock.seed("1", { title: "B", url: "https://b/" });
+  const full = await engine.snapshotBar("manual", { label: "full" });
+
+  const back = await engine.restoreBackup(snapEmpty.id);
+  check("empty: restoring an empty backup clears the bar",
+    back.ok === true && mock.nodes.get("1").children.length === 0, JSON.stringify(back));
+  check("empty: and says so plainly", back.stats.removed === 2, JSON.stringify(back.stats));
+
+  const refill = await engine.restoreBackup(full.id);
+  check("empty: and the full one comes back on top of nothing",
+    refill.ok === true && urlsUnder(mock).join(",") === "https://a/,https://b/",
+    urlsUnder(mock).join(","));
+}
+
+async function testDeleteAndClearBackups() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const a = await engine.snapshotBar("manual", { label: "one" });
+  mock.seed("1", { title: "N", url: "https://n2/" });
+  const b = await engine.snapshotBar("manual", { label: "two" });
+
+  const del = await engine.deleteBackup(a.id);
+  check("delete: reports ok", del.ok === true, JSON.stringify(del));
+  const left = await engine.listBackups();
+  check("delete: the entry is gone", left.entries.length === 1 && left.entries[0].id === b.id);
+  check("delete: and so is the tree behind it", (await backupsMod.get(a.id)) === null);
+  check("delete: an id that is not there is refused, not ignored",
+    (await engine.deleteBackup("nope")).ok === false);
+  check("delete: restoring a deleted backup fails cleanly",
+    (await engine.restoreBackup(a.id)).ok === false);
+
+  const cleared = await engine.clearBackups();
+  check("clear: removes everything", cleared.ok === true &&
+    (await engine.listBackups()).entries.length === 0, JSON.stringify(cleared));
+}
+
+async function testBackupDownloadFile() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const snap = await engine.snapshotBar("manual", { label: "For keeps" });
+  const file = await engine.backupFile(snap.id);
+  check("download: produces a standard bookmark file",
+    file.ok === true && file.data.includes("<!DOCTYPE NETSCAPE-Bookmark-file-1>"),
+    JSON.stringify(file).slice(0, 120));
+  check("download: named after the backup",
+    /^skrim-backup-\d{4}-\d{2}-\d{2}-\d{4}-for-keeps\.html$/.test(file.name), file.name);
+  check("download: holding every bookmark",
+    portableMod.countLinks(portableMod.parseNetscape(file.data)) === 6,
+    String(portableMod.countLinks(portableMod.parseNetscape(file.data))));
+  check("download: a missing backup is refused",
+    (await engine.backupFile("nope")).ok === false);
+}
+
+async function testCorruptStorageDegradesToNoBackups() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  await engine.snapshotBar("manual");
+  mock.storage.set("skrim.backups.index", "not an array");
+  check("corrupt: a damaged index reads as no backups, and does not throw",
+    (await engine.listBackups()).entries.length === 0);
+
+  mock.storage.set("skrim.backups.index", [{ id: "x", at: 1, kind: "manual" }, null, { junk: 1 }]);
+  check("corrupt: malformed entries are dropped, valid ones kept",
+    (await engine.listBackups()).entries.length === 1);
+  check("corrupt: a listed backup whose tree is missing fails cleanly on restore",
+    (await engine.restoreBackup("x")).ok === false);
+
+  // And a hide must still work when the backup layer is unusable.
+  mock.storage.set("skrim.backups.index", "wrecked");
+  const before = JSON.stringify(mock.snapshot("1"));
+  const h = await engine.conceal();
+  check("corrupt: a hide is not blocked by a broken backup store", h.ok === true, JSON.stringify(h));
+  await engine.restore();
+  check("corrupt: and the round trip is still exact",
+    JSON.stringify(mock.snapshot("1")) === before);
+}
+
+async function testBackupStorageFailureNeverFailsAHide() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const before = JSON.stringify(mock.snapshot("1"));
+  const realSet = mock.api.storage.local.set;
+  mock.api.storage.local.set = async (obj) => {
+    if (Object.keys(obj).some((k) => k.startsWith("skrim.backup"))) {
+      throw new Error("quota exceeded");
+    }
+    return realSet(obj);
+  };
+  const h = await engine.conceal();
+  check("quota: a hide still runs when the snapshot cannot be written",
+    h.ok === true, JSON.stringify(h));
+  const r = await engine.restore();
+  check("quota: and restores exactly", r.ok === true &&
+    JSON.stringify(mock.snapshot("1")) === before);
+  check("quota: no half-written backup was listed",
+    (await engine.listBackups()).entries.length === 0);
+  mock.api.storage.local.set = realSet;
+}
+
+async function testRestoreThroughTheWorker() {
+  // The page talks to the worker, not to the engine. Every message the backup
+  // page sends has to reach the same single chain, or a restore could interleave
+  // with a hide.
+  const mock = build();
+  const { engine } = await loadSw(mock);
+  const before = JSON.stringify(mock.snapshot("1"));
+
+  const made = await mock.message({ type: "makeBackup", label: "via the worker" }, {});
+  check("worker: makeBackup reaches the engine", made.ok === true, JSON.stringify(made));
+  const listed = await mock.message({ type: "listBackups" }, {});
+  check("worker: listBackups answers", listed.entries?.length === 1, JSON.stringify(listed));
+
+  mock.seed("1", { title: "Stray", url: "https://stray/" });
+  const dry = await mock.message({ type: "restoreBackup", id: made.id, dry: true }, {});
+  check("worker: a dry run answers with counts and changes nothing",
+    dry.ok === true && dry.stats.removed === 1 &&
+      JSON.stringify(mock.snapshot("1")) !== before, JSON.stringify(dry));
+  const real = await mock.message({ type: "restoreBackup", id: made.id }, {});
+  check("worker: the real restore puts the bar back",
+    real.ok === true && JSON.stringify(mock.snapshot("1")) === before, JSON.stringify(real));
+
+  const file = await mock.message({ type: "backupFile", id: made.id }, {});
+  check("worker: backupFile answers with a downloadable file",
+    file.ok === true && file.name.endsWith(".html"), JSON.stringify(file).slice(0, 100));
+  const del = await mock.message({ type: "deleteBackup", id: made.id }, {});
+  check("worker: deleteBackup answers", del.ok === true, JSON.stringify(del));
+  await engine.status();
+}
+
+async function testDailyBackupRunsFromTheWatchdog() {
+  const mock = build();
+  await loadSw(mock);
+  // The worker registers its alarm listener at import; fire the watchdog.
+  for (const f of mock._listeners.onAlarm) f({ name: "secureshare.watchdog" });
+  await mock.idle(12);
+  const listed = await mock.message({ type: "listBackups" }, {});
+  check("watchdog: the daily snapshot runs from the alarm",
+    listed.entries?.length === 1 && listed.entries[0].kind === "daily",
+    JSON.stringify(listed.entries));
+}
+
+/**
+ * Kill the worker at every call during a diff restore, then check the one thing
+ * that must never be false: no bookmark was LOST. A restore interrupted halfway
+ * leaves a half-sorted bar, which the user can fix by running it again -- but a
+ * bookmark that exists in neither the tree nor a backup is gone for good.
+ */
+
+// --- the decisions the first pass of mutation testing found untested ---------
+
+async function testDedupeNeedsMoreThanAHashMatch() {
+  // The hash is 64 bits, and the only cost of a false match is a backup that
+  // was never taken -- the one failure this whole feature exists to prevent. So
+  // the length and the link count have to agree as well. Forging an index entry
+  // is the only way to exercise that: a real collision cannot be constructed.
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const first = await engine.snapshotBar("manual", { label: "real" });
+  const entry = (await backupsMod.list())[0];
+
+  mock.storage.set("skrim.backups.index", [{ ...entry, count: entry.count + 99 }]);
+  const again = await engine.snapshotBar("daily");
+  check("dedupe: a matching hash with a different count is NOT a duplicate",
+    again.ok === true && again.deduped === false, JSON.stringify(again));
+
+  mock.storage.set("skrim.backups.index", [{ ...entry, len: entry.len + 99 }]);
+  const third = await engine.snapshotBar("daily");
+  check("dedupe: a matching hash with a different length is NOT a duplicate",
+    third.ok === true && third.deduped === false, JSON.stringify(third));
+
+  mock.storage.set("skrim.backups.index", [entry]);
+  const fourth = await engine.snapshotBar("daily");
+  check("dedupe: all three agreeing IS a duplicate",
+    fourth.deduped === true && fourth.id === first.id, JSON.stringify(fourth));
+}
+
+async function testFingerprintSeparatesNestingFromOrder() {
+  // One folder holding another, versus the two side by side. Same titles, same
+  // order, different tree -- so only the nesting delimiters can tell them apart,
+  // and without them a bar someone reorganised would look unchanged and never be
+  // backed up again.
+  const nested = [{ syncing: true, children: [{ title: "F", children: [
+    { title: "G", children: [] } ] }] }];
+  const flat = [{ syncing: true, children: [
+    { title: "F", children: [] }, { title: "G", children: [] } ] }];
+  check("fingerprint: a folder inside another is not the same as the two side by side",
+    backupsMod.fingerprint(nested).hash !== backupsMod.fingerprint(flat).hash,
+    `${backupsMod.fingerprint(nested).hash} vs ${backupsMod.fingerprint(flat).hash}`);
+
+  // And the same for a link: nested one level down, versus beside the folder.
+  const linkIn = [{ syncing: true, children: [{ title: "F", children: [
+    { title: "A", url: "https://a/" } ] }] }];
+  const linkOut = [{ syncing: true, children: [
+    { title: "F", children: [] }, { title: "A", url: "https://a/" } ] }];
+  check("fingerprint: and a bookmark inside a folder is not one beside it",
+    backupsMod.fingerprint(linkIn).hash !== backupsMod.fingerprint(linkOut).hash);
+}
+
+async function testAHalfWrittenBackupLeavesNothingBehind() {
+  // The blob lands, then the index write fails. Without the rollback that leaves
+  // a tree in storage that nothing can list, restore or delete -- it just eats
+  // the quota until the profile is wiped.
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const realSet = mock.api.storage.local.set;
+  mock.api.storage.local.set = async (obj) => {
+    if (Object.prototype.hasOwnProperty.call(obj, "skrim.backups.index")) {
+      throw new Error("index write failed");
+    }
+    return realSet(obj);
+  };
+  const res = await engine.snapshotBar("manual");
+  mock.api.storage.local.set = realSet;
+
+  check("half-written: the caller is told it failed", res.ok === false, JSON.stringify(res));
+  const orphans = [...mock.storage.keys()].filter((k) => k.startsWith("skrim.backup."));
+  check("half-written: and no orphan tree is left in storage", orphans.length === 0,
+    orphans.join(","));
+}
+
+async function testASnapshotThatThrowsStillLetsTheHideRun() {
+  // backups.js swallows its own storage errors, so the only way into
+  // autoSnapshot's catch is a throw from underneath it -- the journal read the
+  // snapshot does before anything else. Failing exactly that one read models a
+  // storage layer that breaks and then recovers, which is the shape of the real
+  // thing: the hide that follows reads the journal too, and must still work.
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const before = JSON.stringify(mock.snapshot("1"));
+  const realGet = mock.api.storage.local.get;
+  let firstJournalRead = true;
+  mock.api.storage.local.get = async (key) => {
+    if (key === "secureshare.journal" && firstJournalRead) {
+      firstJournalRead = false;
+      throw new Error("storage is having a moment");
+    }
+    return realGet(key);
+  };
+  const h = await engine.conceal();
+  mock.api.storage.local.get = realGet;
+
+  check("throwing snapshot: the hide still runs", h.ok === true, JSON.stringify(h));
+  check("throwing snapshot: nothing was stored", (await engine.listBackups()).entries.length === 0);
+  const r = await engine.restore();
+  check("throwing snapshot: and the round trip is still exact",
+    r.ok === true && JSON.stringify(mock.snapshot("1")) === before);
+}
+
+async function testASafetyCopyIsTakenEvenWhenNothingChanged() {
+  // Restoring a backup of a bar that has not moved since. The duplicate check
+  // would happily point at the existing copy and take none -- but a safety copy
+  // is a promise, and "we did not take one because it looked the same as an
+  // older one" is not a sentence this gets to say.
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const snap = await engine.snapshotBar("manual", { label: "unchanged" });
+  const res = await engine.restoreBackup(snap.id);
+  check("safety: a restore that changes nothing still takes one",
+    res.ok === true && !!res.safetyId && res.safetyId !== snap.id, JSON.stringify(res));
+  const entries = await engine.listBackups();
+  check("safety: and it is listed as a safety copy",
+    entries.entries.some((e) => e.id === res.safetyId && e.kind === "safety"),
+    JSON.stringify(entries.entries.map((e) => e.kind)));
+  check("safety: the restore itself was a no-op",
+    res.stats.moved === 0 && res.stats.created === 0 && res.stats.removed === 0,
+    JSON.stringify(res.stats));
+}
+
+async function testNoSafetyCopyMeansNoRestore() {
+  // If the copy that makes this undoable cannot be taken, the restore does not
+  // happen. Failing closed is the whole reason the user is willing to press a
+  // button that deletes bookmarks.
+  const mock = build();
+  const engine = await loadEngine(mock);
+  const snap = await engine.snapshotBar("manual");
+  mock.seed("1", { title: "Stray", url: "https://stray/" });
+  const before = JSON.stringify(mock.snapshot("1"));
+
+  const realSet = mock.api.storage.local.set;
+  mock.api.storage.local.set = async (obj) => {
+    if (Object.keys(obj).some((k) => k.startsWith("skrim.backup"))) {
+      throw new Error("no room");
+    }
+    return realSet(obj);
+  };
+  const res = await engine.restoreBackup(snap.id);
+  mock.api.storage.local.set = realSet;
+
+  check("safety: a restore that cannot take one refuses to run",
+    res.ok === false && /safety copy/.test(res.error ?? ""), JSON.stringify(res));
+  check("safety: and the bar is exactly as it was",
+    JSON.stringify(mock.snapshot("1")) === before);
+}
+
+async function testEachFolderKeepsItsOwnCopyOfADuplicateUrl() {
+  // Three folders, the same URL in each, and the folders reordered since the
+  // backup. Matching purely in document order would hand folder One the copy
+  // that belongs to Three -- the tree would look right and every bookmark would
+  // have changed folders, which is the failure a tree comparison cannot see.
+  const mock = new MockChrome();
+  mock.seed("1", { title: "One", children: [{ title: "Same", url: "https://same/" }] });
+  mock.seed("1", { title: "Two", children: [{ title: "Same", url: "https://same/" }] });
+  mock.seed("1", { title: "Three", children: [{ title: "Same", url: "https://same/" }] });
+  const engine = await loadEngine(mock);
+  const before = JSON.stringify(mock.snapshot("1"));
+
+  const home = new Map(); // link id -> the folder it started in
+  for (const fid of mock.nodes.get("1").children) {
+    for (const kid of mock.nodes.get(fid).children) home.set(kid, mock.nodes.get(fid).title);
+  }
+  const snap = await engine.snapshotBar("manual");
+
+  mock.nodes.get("1").children.reverse();
+  const res = await engine.restoreBackup(snap.id);
+  check("duplicates: the bar is exactly back", JSON.stringify(mock.snapshot("1")) === before,
+    JSON.stringify(mock.snapshot("1")));
+  let stayed = 0;
+  for (const fid of mock.nodes.get("1").children) {
+    for (const kid of mock.nodes.get(fid).children) {
+      if (home.get(kid) === mock.nodes.get(fid).title) stayed++;
+    }
+  }
+  check("duplicates: every copy stayed in the folder it started in, not just in some folder",
+    stayed === 3, `${stayed} of 3 — ${JSON.stringify(res.stats)}`);
+}
+
+async function testBarsArePairedByStorageNotByPosition() {
+  // A snapshot that lists the account bar FIRST. Pairing by position would send
+  // account bookmarks into local storage and silently flip their sync status --
+  // the exact failure roots.js exists to prevent, and a tree comparison of
+  // either bar alone would not notice.
+  const mock = build();
+  const second = addSecondStorage(mock);
+  mock.seed(second.bar, { title: "Account link", url: "https://account/" });
+  const engine = await loadEngine(mock);
+
+  const taken = await backupsMod.get((await engine.snapshotBar("manual")).id);
+  const reversed = [...taken.groups].reverse();
+  check("pairing: the forged snapshot really does list the account bar first",
+    reversed[0].syncing === false, JSON.stringify(reversed.map((g) => g.syncing)));
+  const forged = await backupsMod.put(reversed, "manual", { label: "reversed", force: true });
+
+  const localBefore = JSON.stringify(mock.snapshot("1"));
+  const acctBefore = JSON.stringify(mock.snapshot(second.bar));
+  mock.seed("1", { title: "Local stray", url: "https://ls/" });
+  const res = await engine.restoreBackup(forged.id);
+
+  check("pairing: the restore succeeds", res.ok === true, JSON.stringify(res));
+  check("pairing: each bar got its OWN storage's bookmarks back, order notwithstanding",
+    JSON.stringify(mock.snapshot("1")) === localBefore &&
+      JSON.stringify(mock.snapshot(second.bar)) === acctBefore,
+    JSON.stringify(mock.snapshot("1")));
+  check("pairing: and no account bookmark crossed into local storage",
+    !urlsUnder(mock, "1").includes("https://account/"), urlsUnder(mock, "1").join(","));
+}
+
+async function testDiffRestoreFaultInjection() {
+  let safe = 0;
+  let lost = 0;
+  const lostAt = [];
+  let misses = 0;
+  let repaired = 0;
+  let unrepaired = 0;
+  const unrepairedAt = [];
+  for (let n = 1; n <= 400 && misses < 30; n++) {
+    const mock = build();
+    const engine = await loadEngine(mock);
+    const snap = await engine.snapshotBar("manual");
+    const before = JSON.stringify(mock.snapshot("1"));
+    // Every URL the snapshot promises to put back. The invariant below is about
+    // these and only these: placement never deletes, and the sweep only ever
+    // removes what the snapshot does NOT account for -- so at every single point
+    // a dying worker can interrupt this, all of them must still be on the tree.
+    // A half-sorted bar is something the user fixes by running the restore
+    // again; a bookmark on neither the tree nor a backup is gone for good.
+    const wanted = urlsUnder(mock);
+
+    // Wreck it hard, and identically every time: reorder the top level, drag
+    // every nested link out onto the bar backwards, leave a stray behind.
+    const bar = mock.nodes.get("1");
+    bar.children.push(bar.children.shift());
+    for (const url of ["https://d.example/1", "https://d.example/2",
+                       "https://x.example/", "https://p.example/"]) {
+      const node = [...mock.nodes.values()].find((x) => x.url === url);
+      await mock.api.bookmarks.move(node.id, { parentId: "1", index: 0 });
+    }
+    mock.seed("1", { title: "Stray", url: "https://stray.example/" });
+
+    mock.calls = 0;
+    mock.failAt = n;
+    try { await engine.restoreBackup(snap.id); } catch { /* the worker died */ }
+    mock.failAt = null;
+    // A fault can land after the run has already finished its chrome calls;
+    // that is a miss, not a reason to stop sweeping.
+    if (!mock.failed) { misses++; continue; }
+    misses = 0;
+
+    const onTree = new Set(urlsUnder(mock, "1"));
+    const missing = wanted.filter((u) => !onTree.has(u));
+    if (missing.length !== 0) { lost++; lostAt.push(n); continue; }
+    safe++;
+
+    // The other half of the promise: an interrupted restore is not a state the
+    // user has to understand, it is one they fix by pressing the button again.
+    try { await engine.restoreBackup(snap.id); } catch { /* counted below */ }
+    if (JSON.stringify(mock.snapshot("1")) === before) repaired++;
+    else { unrepaired++; unrepairedAt.push(n); }
+  }
+  return { safe, lost, lostAt, repaired, unrepaired, unrepairedAt };
+}
+
+// --------------------------------------------------------------------------
+
 const t0 = Date.now();
 await testRoundTrip("after-removal");
 await testRoundTrip("before-removal");
@@ -3715,6 +4676,39 @@ await testPortableHtmlLinks();
 await testPortableParsesAStandardExport();
 await testPortableEscapesAndUnescapes();
 await testPortableToleratesMalformedInput();
+await testBackupRetentionIsPureAndCapped();
+await testBackupIdsAndFileNames();
+await testSnapshotAndDedupe();
+await testSnapshotRefusesWhileHidden();
+await testPreHideSnapshot();
+await testAutoBackupOffTakesNothing();
+await testDailyBackupSchedule();
+await testDiffRestoreIsExactAndMovesRatherThanRebuilds();
+await testDiffRestoreUndoesItself();
+await testDiffRestoreRepairsTheIndexBug();
+await testDiffRestoreNeverMovesAFolderIntoItself();
+await testDiffRestoreLeavesPolicyBookmarksAlone();
+await testRestoreAsAFolderIsAdditive();
+await testRestoreRefusesWhileHidden();
+await testSplitStorageBarsNeverCross();
+await testSignedOutProfileStillRestores();
+await testDuplicateUrlsStayWhereTheyBelong();
+await testEmptyBarRestores();
+await testDeleteAndClearBackups();
+await testBackupDownloadFile();
+await testCorruptStorageDegradesToNoBackups();
+await testBackupStorageFailureNeverFailsAHide();
+await testRestoreThroughTheWorker();
+await testDailyBackupRunsFromTheWatchdog();
+await testDedupeNeedsMoreThanAHashMatch();
+await testFingerprintSeparatesNestingFromOrder();
+await testAHalfWrittenBackupLeavesNothingBehind();
+await testASnapshotThatThrowsStillLetsTheHideRun();
+await testASafetyCopyIsTakenEvenWhenNothingChanged();
+await testNoSafetyCopyMeansNoRestore();
+await testEachFolderKeepsItsOwnCopyOfADuplicateUrl();
+await testBarsArePairedByStorageNotByPosition();
+const fb = await testDiffRestoreFaultInjection();
 const fi = await testFaultInjection();
 const fr = await testFaultInjectionRestore();
 const ft = await testTuckModeSurvivesInterruption();
@@ -3735,6 +4729,13 @@ console.log(`\n  FAULT INJECTION — RESTORE phase:`);
 console.log(`    fully repaired  : ${fr.repaired}`);
 console.log(`    NOT repaired    : ${fr.broken}`);
 if (fr.brokenAt.length) console.log(`    broken at calls : ${fr.brokenAt.join(", ")}`);
+console.log(`\n  FAULT INJECTION — DIFF RESTORE (nothing may be lost):`);
+console.log(`    nothing lost    : ${fb.safe}`);
+console.log(`    LOST bookmarks  : ${fb.lost}`);
+if (fb.lostAt.length) console.log(`    lost at calls   : ${fb.lostAt.join(", ")}`);
+console.log(`    fixed by a re-run : ${fb.repaired}`);
+console.log(`    still wrong       : ${fb.unrepaired}`);
+if (fb.unrepairedAt.length) console.log(`    wrong at calls  : ${fb.unrepairedAt.join(", ")}`);
 console.log(`\n  FAULT INJECTION — TUCK hide:`);
 console.log(`    fully repaired  : ${ft.repaired}`);
 console.log(`    NOT repaired    : ${ft.broken}`);
@@ -3754,4 +4755,8 @@ if (failures.length) {
 }
 console.log("=".repeat(66));
 fs.rmSync(BUILD, { recursive: true, force: true });
-process.exit(fail === 0 && fi.broken === 0 && fr.broken === 0 && ft.broken === 0 ? 0 : 1);
+process.exit(
+  fail === 0 && fi.broken === 0 && fr.broken === 0 && ft.broken === 0 && fb.lost === 0 && fb.unrepaired === 0
+    ? 0
+    : 1,
+);

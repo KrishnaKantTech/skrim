@@ -31,6 +31,13 @@ export const DEFAULTS = {
   // pre-fill it. A generic, unremarkable default: a folder called this on the
   // bar draws no second glance, which is the point of the feature.
   tuckName: "Bookmarks",
+  // Whether Skrim keeps its own snapshots of the bar -- one before every hide,
+  // one a day. ON by default, and deliberately so: this is the net under an
+  // extension whose whole job is moving the user's bookmarks around, and a net
+  // nobody switched on is not a net. It costs no permission (chrome.storage is
+  // already ours for the journal) and nothing leaves the machine. Off means no
+  // automatic snapshots at all; existing ones stay, and Back up now still works.
+  autoBackup: true,
 };
 
 /** Every setting, with defaults filled in for anything never written. */
@@ -63,7 +70,13 @@ export async function write(patch) {
     const trimmed = patch.tuckName.trim().slice(0, 60);
     if (trimmed) next.tuckName = trimmed;
   }
-  const clean = { decoys: next.decoys, tuckMode: next.tuckMode, tuckName: next.tuckName };
+  if (typeof patch?.autoBackup === "boolean") next.autoBackup = patch.autoBackup;
+  const clean = {
+    decoys: next.decoys,
+    tuckMode: next.tuckMode,
+    tuckName: next.tuckName,
+    autoBackup: next.autoBackup,
+  };
   await chrome.storage.local.set({ [KEY]: clean });
   return clean;
 }

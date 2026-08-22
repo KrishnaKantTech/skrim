@@ -108,6 +108,23 @@ you can rely on and one that fails silently:
   still show the bar for a moment. Meet and Zoom both preview clean; this is a
   limit of the picker, not something an extension can reach.
 
+## If something goes wrong, there is a copy
+
+Skrim keeps its own snapshots of your bookmarks bar — one taken right before
+every hide, one a day if anything changed, and any you take by hand. They live
+inside the extension on this computer, cost no extra permission, and are never
+sent anywhere.
+
+Putting one back **moves** what is still there rather than deleting the bar and
+building it again: bookmarks keep their ids and their dates, and your other
+signed-in computers see a handful of moves instead of a delete and a create for
+every item. It shows you exactly what it will change before it changes anything,
+and takes a copy of the bar as it stands first — so a restore is itself
+undoable. Open it from the popup: **Settings & backup → Backups & files**.
+
+Old ones are dropped by count, never by age. A backup is never deleted for
+being old, because that is precisely when you would go looking for it.
+
 ## One thing to know if you use Chrome Sync
 
 Bookmarks are synced data, so while your bar is hidden here it is also empty on
@@ -168,11 +185,14 @@ for an unpacked one.
 ## Tests
 
 ```
-assertions            301 pass / 0 fail
+assertions            594 pass / 0 fail
 fault inject HIDE      30 repaired / 0 broken
 fault inject RESTORE   41 repaired / 0 broken
-mutations              54 caught / 0 survived
+fault inject BACKUP    19 safe / 0 bookmarks lost
+mutations              91 caught / 0 survived
 live (real Chrome)     71 pass / 0 fail
+store install          33 pass / 0 fail
+feature QA             46 pass / 0 fail
 1000-item hide         5ms
 ```
 

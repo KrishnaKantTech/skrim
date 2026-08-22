@@ -180,5 +180,37 @@ function showReceiptFromUrl() {
     `use the button above and they will go back exactly.`;
 }
 
+/**
+ * The copies Skrim keeps for itself, mentioned here because this page is the one
+ * place someone arrives already knowing something has gone wrong -- and a
+ * snapshot taken before the last hide is a better answer than dragging a folder
+ * around by hand.
+ *
+ * Below the vault list, never above it: the vault holds the actual bookmarks
+ * that are missing right now, and a backup is the fallback when putting them
+ * back does not go right.
+ */
+async function showBackups() {
+  let res = null;
+  try {
+    res = await call("listBackups", () => engine.listBackups());
+  } catch {
+    return; /* the box stays hidden; the manual steps below always work */
+  }
+  const n = res?.entries?.length ?? 0;
+  if (n === 0) return;
+  const newest = res.entries[0];
+  $("backupsNote").textContent =
+    `Skrim has ${plural(n, "copy", "copies")} of how your bookmarks bar looked, kept on this ` +
+    `computer. The most recent is from ${when(newest.at)} and holds ` +
+    `${plural(newest.count ?? 0, "bookmark")}. Any of them can be put straight back onto ` +
+    `the bar, or downloaded as a file.`;
+  $("backupsBox").hidden = false;
+}
+
+$("openBackups").onclick = () =>
+  chrome.tabs.create({ url: chrome.runtime.getURL("backup.html") });
+
 showReceiptFromUrl();
 load();
+showBackups();

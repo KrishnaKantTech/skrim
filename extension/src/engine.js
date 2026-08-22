@@ -24,6 +24,7 @@ import * as journal from "./journal.js";
 import * as receipt from "./receipt.js";
 import * as settings from "./settings.js";
 import * as portable from "./portable.js";
+import * as backups from "./backups.js";
 
 export const VAULT_TITLE =
   "Skrim — hidden while screen sharing (drag these back to your bookmarks bar)";
@@ -1152,8 +1153,20 @@ export const restore = (opts) => serialize(() => restoreImpl(opts));
  * so a glitch can only ever route to the vault path, never strand a hide.
  */
 async function concealImpl(opts = {}) {
-  const { tuckMode, tuckName } = await settings.read();
-  return tuckMode ? tuckHideImpl(tuckName) : hideImpl(opts);
+  const saved = await settings.read();
+  // The snapshot goes HERE and not inside hideImpl/tuckHideImpl for two
+  // reasons. It is taken before either mechanism is chosen, so one copy covers
+  // both; and `hide` stays the pure vault primitive the fault-injection sweep
+  // counts chrome calls through, which a storage write in the middle of would
+  // renumber.
+  //
+  // Unconditional, with autoSnapshot reading the switch itself: the ONE place
+  // that decides whether an automatic snapshot happens is inside that function,
+  // so there is no second copy of the rule here to fall out of step with it.
+  // It can never throw -- a hide must not be able to fail because of its own
+  // safety net -- and its result is deliberately ignored.
+  await autoSnapshot(backups.Kind.PREHIDE);
+  return saved.tuckMode ? tuckHideImpl(saved.tuckName) : hideImpl(opts);
 }
 
 export const conceal = (opts) => serialize(() => concealImpl(opts));
@@ -2033,3 +2046,627 @@ async function importTreeImpl(nodes, { folderTitle } = {}) {
 
 export const exportBar = (format) => serialize(() => exportBarImpl(format));
 export const importTree = (nodes, opts) => serialize(() => importTreeImpl(nodes, opts));
+
+// ---------------------------------------------------------------------------
+// Snapshots.
+//
+// The backup page's Download button hands the user a file and hopes they keep
+// it. These are the copies Skrim keeps for itself: one before every hide, one a
+// day, plus whatever the user takes by hand. backups.js owns the storage, the
+// dedupe and the retention; this section owns the two things that need the
+// bookmark tree -- reading it into a snapshot, and putting one back.
+//
+// Everything here runs on the same serialize() chain as hide and restore, so a
+// snapshot can never be taken halfway through a hide, and a restore from a
+// snapshot can never interleave with one.
+
+/** A bookmark subtree, narrowed to the portable shape, policy nodes dropped.
+ *  A policy-managed bookmark cannot be moved, renamed or deleted, so recording
+ *  one would only ever produce a duplicate on the way back. */
+function toPortableTree(nodes) {
+  const out = [];
+  for (const n of nodes ?? []) {
+    if (!isMutable(n)) continue;
+    out.push(
+      n.url === undefined || n.url === null
+        ? { title: n.title ?? "", dateAdded: n.dateAdded, children: toPortableTree(n.children) }
+        : { title: n.title ?? "", url: n.url, dateAdded: n.dateAdded },
+    );
+  }
+  return out;
+}
+
+/**
+ * Every bar the profile has, kept APART by storage rather than merged.
+ *
+ * Chrome's split local/account storage can surface two bars and renders them as
+ * one strip. A snapshot that merged them would, on the way back, move account
+ * bookmarks into local storage and silently change their sync status -- the
+ * exact failure roots.js exists to prevent for hiding. So the snapshot carries
+ * the `syncing` flag with each set, and the restore pairs them up again.
+ */
+async function readBarGroups() {
+  const { groups, skippedBars } = await getGroups();
+  const out = [];
+  for (const g of groups) {
+    const sub = await chrome.bookmarks.getSubTree(g.bar.id).catch(() => null);
+    if (!sub) continue;
+    out.push({
+      syncing: g.syncing ?? null,
+      barId: g.bar.id,
+      children: toPortableTree(sub[0]?.children ?? []),
+    });
+  }
+  return { groups: out, skippedBars };
+}
+
+async function snapshotBarImpl(kind, { label = "", force = false, at = Date.now() } = {}) {
+  // A hidden bar holds decoys, and the real items are in a vault. Snapshotting
+  // then would save the cover story as if it were the bookmarks.
+  if (journal.isDisplaced(await journal.read())) {
+    return { ok: false, hidden: true, error: "bar is hidden" };
+  }
+  let read;
+  try {
+    read = await readBarGroups();
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err) };
+  }
+  if (read.groups.length === 0) return { ok: false, error: "no bookmarks bar" };
+  // `barId` is this profile's, right now; it means nothing to a restore days
+  // later and is not worth storing.
+  const stored = read.groups.map((g) => ({ syncing: g.syncing, children: g.children }));
+  return backups.put(stored, kind, { label, force, at });
+}
+
+/**
+ * The automatic path. Returns a result, never throws, and never runs when the
+ * user has switched automatic backups off. Its caller is a hide.
+ */
+async function autoSnapshot(kind, opts) {
+  try {
+    const { autoBackup } = await settings.read();
+    if (!autoBackup) return { ok: false, off: true };
+    return await snapshotBarImpl(kind, opts);
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err) };
+  }
+}
+
+/** How long between automatic daily snapshots. */
+const DAILY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The once-a-day snapshot, called from the watchdog -- which fires every
+ * minute, so the cheap guard comes first: a stored timestamp, not a tree read.
+ * Only when a day has actually passed does this touch chrome.bookmarks, and the
+ * timestamp is advanced even when the result was a duplicate, so an unchanged
+ * bar costs one read a day rather than one a minute.
+ */
+async function maybeDailyBackupImpl(now = Date.now()) {
+  try {
+    const { autoBackup } = await settings.read();
+    if (!autoBackup) return { ok: false, off: true };
+    if (journal.isDisplaced(await journal.read())) return { ok: false, hidden: true };
+    const m = await backups.meta();
+    const last = typeof m.lastAutoAt === "number" ? m.lastAutoAt : 0;
+    // A clock that jumped backwards (timezone change, NTP correction) must not
+    // park the next daily snapshot days into the future.
+    if (last <= now && now - last < DAILY_MS) return { ok: false, tooSoon: true };
+    const res = await snapshotBarImpl(backups.Kind.DAILY, { at: now });
+    if (res.ok || res.hidden !== true) await backups.setMeta({ lastAutoAt: now });
+    return res;
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Restoring a snapshot, by diff.
+//
+// The obvious build -- delete the bar and make it again from the snapshot --
+// is wrong in two ways that matter. It fires a delete and a create for every
+// bookmark, which every other signed-in computer then has to swallow; and
+// chrome.bookmarks.create cannot set dateAdded, so it silently resets the age of
+// the user's entire bar.
+//
+// So this MOVES. It indexes everything already under the bar, matches each item
+// in the snapshot to the real bookmark that is still there -- wherever it has
+// drifted to -- and relocates it. An item that is already in the right place is
+// not touched at all. Only what is genuinely missing is created, and only what
+// is genuinely surplus is deleted. Recovering from the 2026-08-21 index bug is
+// eleven moves and no deletions.
+//
+// Two invariants make it safe rather than merely clever:
+//
+//  1. A node is only ever moved into a parent that is ALREADY FINAL. Placement
+//     starts at the bar and descends, so every node in that parent's ancestor
+//     chain has already been matched, and the node now being placed has not --
+//     therefore it cannot be one of its own future ancestors. A folder can never
+//     be moved into itself, by construction rather than by a check. (Placement
+//     within a folder is breadth first, children after all siblings, which is a
+//     readability choice rather than the safety one: it keeps a folder's whole
+//     index arithmetic in a single loop.)
+//  2. Within one parent, items are placed left to right, so a same-parent move
+//     is always BACKWARDS -- to an index lower than the node currently sits at.
+//     chrome.bookmarks.move()'s index handling for a same-parent move is a known
+//     ambiguity (see mock-chrome.mjs); both readings of it agree on a backwards
+//     move, so this never has to know which Chrome it is talking to.
+//
+// Deletion happens once, at the very end, after everything has been placed.
+// Doing it as we went would destroy a folder whose contents a later part of the
+// snapshot still needed to match against.
+
+const MAX_TREE_DEPTH = 50;
+
+/**
+ * Everything mutable under a bar, flat, plus each folder's child order.
+ *
+ * `nodes` deliberately omits policy-managed bookmarks so nothing can ever match
+ * one, move one, or delete one. `childIds` deliberately includes them, because
+ * they still occupy a slot and the index arithmetic has to know.
+ */
+async function indexBar(barId) {
+  const sub = await chrome.bookmarks.getSubTree(barId).catch(() => null);
+  const nodes = new Map();
+  const childIds = new Map();
+  const byKey = new Map();
+  let order = 0;
+
+  const walk = (kids, parentId, depth) => {
+    const ids = [];
+    for (const k of kids ?? []) {
+      ids.push(k.id);
+      if (!isMutable(k)) continue;
+      const folder = k.url === undefined || k.url === null;
+      const rec = {
+        id: k.id,
+        parentId,
+        title: k.title ?? "",
+        url: folder ? undefined : k.url,
+        folder,
+        order: order++,
+      };
+      nodes.set(k.id, rec);
+      const key = folder ? `F:${rec.title}` : `L:${rec.url}`;
+      const bucket = byKey.get(key);
+      if (bucket) bucket.push(rec);
+      else byKey.set(key, [rec]);
+      if (folder && depth < MAX_TREE_DEPTH) walk(k.children, k.id, depth + 1);
+      else if (folder) childIds.set(k.id, []);
+    }
+    childIds.set(parentId, ids);
+  };
+  walk(sub?.[0]?.children ?? [], barId, 0);
+  return { nodes, childIds, byKey };
+}
+
+/**
+ * The real bookmark that a snapshot entry refers to, or null to create one.
+ *
+ * Links are keyed by URL and folders by title -- the two things that actually
+ * identify a bookmark to a person. Among equal candidates, one still sitting in
+ * the folder we are filling wins over one that has drifted, and for a link an
+ * exact title match breaks the remaining tie. So a bar with three copies of the
+ * same URL in three folders keeps all three where they belong instead of
+ * shuffling them.
+ */
+function matchNode(want, isFolder, parentId, ctx) {
+  const key = isFolder ? `F:${want.title ?? ""}` : `L:${want.url}`;
+  const cands = ctx.byKey.get(key);
+  if (!cands) return null;
+  let best = null;
+  let bestScore = -1;
+  for (const rec of cands) {
+    if (ctx.used.has(rec.id)) continue;
+    if (rec.folder !== isFolder) continue;
+    // Defensive only -- invariant 1 above makes this unreachable. If it ever
+    // fires, creating a fresh node is strictly better than throwing.
+    if (isFolder && isAncestorOf(rec.id, parentId, ctx)) continue;
+    let score = rec.parentId === parentId ? 2 : 0;
+    if (!isFolder && rec.title === (want.title ?? "")) score += 1;
+    if (score > bestScore) {
+      bestScore = score;
+      best = rec;
+      if (score === 3 || (isFolder && score === 2)) break;
+    }
+  }
+  return best;
+}
+
+function isAncestorOf(ancestorId, nodeId, ctx) {
+  let p = nodeId;
+  for (let i = 0; i < MAX_TREE_DEPTH + 2 && p; i++) {
+    if (p === ancestorId) return true;
+    p = ctx.nodes.get(p)?.parentId;
+  }
+  return false;
+}
+
+/** Move a node in our model of the tree. Mirrors what Chrome just did. */
+function placeInModel(rec, parentId, index, ctx) {
+  const from = ctx.childIds.get(rec.parentId);
+  if (from) {
+    const i = from.indexOf(rec.id);
+    if (i >= 0) from.splice(i, 1);
+  }
+  const to = ctx.childIds.get(parentId) ?? [];
+  to.splice(Math.max(0, Math.min(index, to.length)), 0, rec.id);
+  ctx.childIds.set(parentId, to);
+  rec.parentId = parentId;
+}
+
+function subtreeCount(id, ctx) {
+  let links = 0;
+  let folders = 0;
+  const walk = (nid, depth) => {
+    const rec = ctx.nodes.get(nid);
+    if (!rec || depth > MAX_TREE_DEPTH) return;
+    if (!rec.folder) {
+      links++;
+      return;
+    }
+    folders++;
+    for (const c of [...(ctx.childIds.get(nid) ?? [])]) walk(c, depth + 1);
+  };
+  walk(id, 0);
+  return { links, folders };
+}
+
+function forgetSubtree(id, ctx) {
+  const rec = ctx.nodes.get(id);
+  if (!rec) return;
+  const sib = ctx.childIds.get(rec.parentId);
+  if (sib) {
+    const i = sib.indexOf(id);
+    if (i >= 0) sib.splice(i, 1);
+  }
+  const kill = (nid, depth) => {
+    if (depth > MAX_TREE_DEPTH) return;
+    for (const c of [...(ctx.childIds.get(nid) ?? [])]) kill(c, depth + 1);
+    ctx.childIds.delete(nid);
+    ctx.nodes.delete(nid);
+  };
+  kill(id, 0);
+}
+
+/**
+ * Make one folder's children match `want`, then recurse into the folders it
+ * placed. Breadth before depth -- see invariant 1.
+ */
+async function reconcileFolder(parentId, want, ctx, depth = 0) {
+  if (depth > MAX_TREE_DEPTH) return;
+  const s = ctx.stats;
+  const descend = [];
+
+  for (let k = 0; k < (want?.length ?? 0); k++) {
+    const w = want[k];
+    if (!w || typeof w !== "object") continue;
+    const isFolder = w.url === undefined || w.url === null;
+    if (!isFolder && (typeof w.url !== "string" || !w.url)) continue;
+    const title = String(w.title ?? "");
+
+    let rec = matchNode(w, isFolder, parentId, ctx);
+
+    if (rec) {
+      ctx.used.add(rec.id);
+      const cur = ctx.childIds.get(parentId) ?? [];
+      const at = rec.parentId === parentId ? cur.indexOf(rec.id) : -1;
+      if (at === k) {
+        s.kept++;
+      } else {
+        // Same parent: `at` is strictly greater than k, because 0..k-1 already
+        // hold the snapshot's first k items. A backwards move, which both
+        // readings of chrome.bookmarks.move agree on.
+        const ok = await runMove(rec, parentId, k, ctx);
+        if (ok) s.moved++;
+        else s.failed++;
+      }
+      if (rec.title !== title) {
+        if (!ctx.dry) await bmUpdate(rec.id, { title });
+        rec.title = title;
+        s.renamed++;
+      } else if (!isFolder && rec.url !== w.url) {
+        if (!ctx.dry) await bmUpdate(rec.id, { url: w.url });
+        rec.url = w.url;
+        s.renamed++;
+      }
+    } else {
+      rec = await runCreate(w, isFolder, title, parentId, k, ctx);
+      if (!rec) {
+        s.failed++;
+        continue;
+      }
+      s.created++;
+    }
+
+    if (isFolder) descend.push([rec.id, w.children]);
+  }
+
+  for (const [id, kids] of descend) await reconcileFolder(id, kids, ctx, depth + 1);
+}
+
+/**
+ * The index is a request, never a requirement -- chrome.bookmarks.move rejects
+ * an out-of-range index rather than clamping it, so a wrong one must cost at
+ * worst a position, never the bookmark. Same reasoning as restoreToBar.
+ */
+async function runMove(rec, parentId, index, ctx) {
+  if (ctx.dry) {
+    placeInModel(rec, parentId, index, ctx);
+    return true;
+  }
+  try {
+    await bmMove(rec.id, { parentId, index });
+    placeInModel(rec, parentId, index, ctx);
+    return true;
+  } catch {
+    try {
+      await bmMove(rec.id, { parentId });
+      // Appended, not placed. The model records where it ACTUALLY went, so
+      // every index computed after this one stays true to the tree.
+      placeInModel(rec, parentId, (ctx.childIds.get(parentId) ?? []).length, ctx);
+    } catch {
+      return false;
+    }
+    return false;
+  }
+}
+
+async function runCreate(w, isFolder, title, parentId, index, ctx) {
+  const rec = {
+    id: null,
+    parentId,
+    title,
+    url: isFolder ? undefined : w.url,
+    folder: isFolder,
+    order: 1e9 + ctx.newSeq,
+  };
+  if (ctx.dry) {
+    rec.id = `#new${ctx.newSeq++}`;
+  } else {
+    try {
+      const props = { parentId, index, title };
+      if (!isFolder) props.url = w.url;
+      const node = await bmCreate(props);
+      rec.id = node.id;
+    } catch {
+      try {
+        const props = { parentId, title };
+        if (!isFolder) props.url = w.url;
+        const node = await bmCreate(props);
+        rec.id = node.id;
+        ctx.nodes.set(rec.id, rec);
+        ctx.used.add(rec.id);
+        if (isFolder) ctx.childIds.set(rec.id, []);
+        placeInModel(rec, parentId, (ctx.childIds.get(parentId) ?? []).length, ctx);
+        return rec;
+      } catch {
+        return null;
+      }
+    }
+  }
+  ctx.nodes.set(rec.id, rec);
+  ctx.used.add(rec.id);
+  if (isFolder) ctx.childIds.set(rec.id, []);
+  const to = ctx.childIds.get(parentId) ?? [];
+  to.splice(Math.max(0, Math.min(index, to.length)), 0, rec.id);
+  ctx.childIds.set(parentId, to);
+  return rec;
+}
+
+/**
+ * Delete what the snapshot does not account for -- once, after every placement
+ * is done, so nothing is destroyed that a later match still needed.
+ *
+ * A node absent from `nodes` is policy-managed: never removed, never descended
+ * into, left exactly where it is.
+ */
+async function sweepUnplaced(parentId, ctx, depth = 0) {
+  if (depth > MAX_TREE_DEPTH) return;
+  for (const id of [...(ctx.childIds.get(parentId) ?? [])]) {
+    const rec = ctx.nodes.get(id);
+    if (!rec) continue;
+    if (ctx.used.has(id)) {
+      if (rec.folder) await sweepUnplaced(id, ctx, depth + 1);
+      continue;
+    }
+    const n = subtreeCount(id, ctx);
+    if (!ctx.dry && !(await safeRemoveTree(id))) {
+      ctx.stats.failed++;
+      continue;
+    }
+    ctx.stats.removed += n.links;
+    ctx.stats.removedFolders += n.folders;
+    forgetSubtree(id, ctx);
+  }
+}
+
+/**
+ * Pair each set of bookmarks in the snapshot with the bar it came from.
+ *
+ * Matched on the `syncing` flag, so account bookmarks are never restored into
+ * local storage. The one exception is the ordinary case of a user who signed in
+ * or out since the snapshot was taken: one bar then, one bar now, and the flag
+ * is the only thing that changed. Refusing there would strand the backup for
+ * the most common profile there is.
+ */
+function pairGroups(snapGroups, liveGroups) {
+  const pairs = [];
+  const usedLive = new Set();
+  const usedSnap = new Set();
+  for (let i = 0; i < snapGroups.length; i++) {
+    for (let j = 0; j < liveGroups.length; j++) {
+      if (usedLive.has(j)) continue;
+      if ((snapGroups[i].syncing ?? null) === (liveGroups[j].syncing ?? null)) {
+        pairs.push([i, j]);
+        usedLive.add(j);
+        usedSnap.add(i);
+        break;
+      }
+    }
+  }
+  if (pairs.length === 0 && snapGroups.length === 1 && liveGroups.length === 1) {
+    pairs.push([0, 0]);
+    usedSnap.add(0);
+    usedLive.add(0);
+  }
+  return {
+    pairs,
+    // Bars we hold no snapshot for are LEFT ALONE. Emptying one because this
+    // backup has nothing to say about it would be the worst bug in the file.
+    skippedBars: liveGroups.length - pairs.length,
+    skippedSets: snapGroups.length - pairs.length,
+  };
+}
+
+function newStats() {
+  return { moved: 0, created: 0, removed: 0, removedFolders: 0, renamed: 0, kept: 0, failed: 0 };
+}
+
+/**
+ * Put the bar back the way a snapshot remembers it.
+ *
+ * `dry` computes exactly the same plan against the same model without touching
+ * a single bookmark, which is what the page's confirm dialog is built from --
+ * the numbers the user agrees to are the numbers this produced, not an estimate
+ * of them.
+ */
+async function restoreBackupImpl(id, { mode = "diff", dry = false, folderTitle } = {}) {
+  if (journal.isDisplaced(await journal.read())) {
+    return { ok: false, hidden: true, error: "bar is hidden" };
+  }
+  const snap = await backups.get(id);
+  if (!snap) return { ok: false, error: "that backup is missing or damaged" };
+  if (!Array.isArray(snap.groups) || snap.groups.length === 0) {
+    return { ok: false, error: "that backup is empty or damaged" };
+  }
+
+  if (mode === "folder") {
+    const nodes = backups.flatten(snap.groups);
+    if (nodes.length === 0) return { ok: false, error: "that backup holds nothing to add" };
+    if (dry) {
+      return {
+        ok: true,
+        dry: true,
+        mode: "folder",
+        stats: { ...newStats(), created: backups.countLinks(snap.groups) },
+      };
+    }
+    const res = await importTreeImpl(nodes, {
+      folderTitle: folderTitle ?? backupFolderTitle(snap),
+    });
+    return res.ok ? { ...res, mode: "folder", backupId: id } : res;
+  }
+
+  let live;
+  try {
+    live = await getGroups();
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err) };
+  }
+  const paired = pairGroups(snap.groups, live.groups);
+  if (paired.pairs.length === 0) {
+    return { ok: false, error: "this backup does not match any bookmarks bar on this profile" };
+  }
+
+  // Before a single bookmark moves. Forced past the duplicate check on purpose:
+  // a safety copy is a promise, and "we did not take one because it looked the
+  // same as an older one" is not a sentence this should ever have to say.
+  let safetyId = null;
+  if (!dry) {
+    const safety = await snapshotBarImpl(backups.Kind.SAFETY, {
+      label: "before restoring a backup",
+      force: true,
+    });
+    if (!safety.ok) {
+      return {
+        ok: false,
+        error: `could not take a safety copy first (${safety.error ?? "unknown"}), so nothing was changed`,
+      };
+    }
+    safetyId = safety.id;
+  }
+
+  const stats = newStats();
+  for (const [si, li] of paired.pairs) {
+    const barId = live.groups[li].bar.id;
+    const idx = await indexBar(barId);
+    const ctx = { ...idx, used: new Set(), stats, dry, newSeq: 1 };
+    await reconcileFolder(barId, snap.groups[si].children, ctx, 0);
+    await sweepUnplaced(barId, ctx, 0);
+  }
+
+  return {
+    ok: true,
+    dry,
+    mode: "diff",
+    backupId: id,
+    safetyId,
+    stats,
+    skippedBars: paired.skippedBars + (live.skippedBars ?? 0),
+    skippedSets: paired.skippedSets,
+  };
+}
+
+function backupFolderTitle(snap) {
+  if (snap?.label) return `Backup — ${snap.label}`.slice(0, 80);
+  let when;
+  try {
+    when = new Date(snap?.at ?? Date.now()).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    when = new Date(snap?.at ?? Date.now()).toISOString().slice(0, 16).replace("T", " ");
+  }
+  return `Backup — ${when}`.slice(0, 80);
+}
+
+/** One snapshot as the standard bookmark file, for the Download button. */
+async function backupFileImpl(id) {
+  const snap = await backups.get(id);
+  if (!snap) return { ok: false, error: "that backup is missing or damaged" };
+  const children = backups.flatten(snap.groups);
+  return {
+    ok: true,
+    id,
+    at: snap.at,
+    kind: snap.kind,
+    label: snap.label ?? "",
+    count: backups.countLinks(snap.groups),
+    name: backups.fileNameFor({ at: snap.at, kind: snap.kind, label: snap.label }),
+    data: portable.toNetscapeHtml(children, { title: "Bookmarks bar" }),
+  };
+}
+
+// --- public surface ---------------------------------------------------------
+
+export const snapshotBar = (kind, opts) =>
+  serialize(() => snapshotBarImpl(kind ?? backups.Kind.MANUAL, opts));
+export const maybeDailyBackup = (now) => serialize(() => maybeDailyBackupImpl(now));
+export const restoreBackup = (id, opts) => serialize(() => restoreBackupImpl(id, opts));
+export const backupFile = (id) => serialize(() => backupFileImpl(id));
+export const deleteBackup = (id) => serialize(() => backups.remove(id));
+export const clearBackups = () => serialize(() => backups.clear());
+
+/** The list, plus what the page needs to render it without a second round trip. */
+export const listBackups = () =>
+  serialize(async () => {
+    const [entries, use, saved, j] = await Promise.all([
+      backups.list(),
+      backups.usage(),
+      settings.read(),
+      journal.read(),
+    ]);
+    return {
+      ok: true,
+      entries,
+      usage: use,
+      autoBackup: saved.autoBackup !== false,
+      hidden: journal.isDisplaced(j),
+      labels: backups.LABELS,
+    };
+  });

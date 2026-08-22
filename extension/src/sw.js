@@ -224,6 +224,13 @@ async function runWatchdog() {
     // Cosmetic cleanup deliberately cannot fail a restore, so this is the only
     // thing that ever finishes it.
     await engine.sweepStrayDecoys();
+    // The once-a-day snapshot. Cheap to ask on every tick: it checks a stored
+    // timestamp before it reads a single bookmark, so an unchanged bar costs
+    // one tree read a day rather than one a minute. Only ever from the settled
+    // branch -- a displaced bar holds decoys, not bookmarks.
+    await engine
+      .maybeDailyBackup()
+      .catch((e) => console.warn("[secureshare] daily backup failed", e));
     await refreshAction();
     return;
   }
@@ -428,6 +435,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           break;
         case "importBookmarks":
           sendResponse(await engine.importTree(msg.nodes, { folderTitle: msg.folderTitle }));
+          break;
+        // --- snapshots. The engine owns the one chain every bookmark
+        // operation runs on, so a backup taken from the page cannot interleave
+        // with a hide happening in the same second.
+        case "listBackups":
+          sendResponse(await engine.listBackups());
+          break;
+        case "makeBackup":
+          sendResponse(await engine.snapshotBar("manual", { label: msg.label, force: true }));
+          break;
+        case "backupFile":
+          sendResponse(await engine.backupFile(msg.id));
+          break;
+        case "restoreBackup":
+          sendResponse(
+            await engine.restoreBackup(msg.id, { mode: msg.mode, dry: msg.dry }),
+          );
+          break;
+        case "deleteBackup":
+          sendResponse(await engine.deleteBackup(msg.id));
+          break;
+        case "clearBackups":
+          sendResponse(await engine.clearBackups());
           break;
         default:
           sendResponse({ ok: false, error: `unknown message: ${msg?.type}` });

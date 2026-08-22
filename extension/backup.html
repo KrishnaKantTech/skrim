@@ -122,6 +122,80 @@
       .safe {
         margin-top: 1.5rem; font-size: 0.85rem; color: var(--muted);
       }
+
+      /* --- the snapshot list -------------------------------------------- */
+
+      /* The card's own header row: title on the left, the automatic-backups
+         switch on the right, because the switch is what governs everything
+         listed below it and reads as a caption anywhere else. */
+      .card__head {
+        display: flex; align-items: flex-start; justify-content: space-between;
+        gap: 1rem; margin-bottom: 0.35rem;
+      }
+      .card__head h3 { margin: 0; }
+
+      .snaps { list-style: none; margin: 1rem 0 0; padding: 0; }
+      .snap {
+        display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap;
+        padding: 0.7rem 0;
+        border-top: 1px solid var(--line);
+      }
+      .snap:first-child { border-top: 0; }
+      .snap__text { flex: 1 1 14rem; min-width: 0; }
+      .snap__when { color: var(--text); font-weight: 600; }
+      .snap__name {
+        display: block; color: var(--text); font-weight: 600;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      /* A named backup puts the name first and demotes the date; an unnamed one
+         has only the date, which then has to carry full weight. */
+      .snap__name + .snap__when { font-weight: 400; color: var(--muted); font-size: 0.85rem; }
+      .snap__meta { display: block; color: var(--faint); font-size: 0.82rem; margin-top: 0.1rem; }
+      .snap__actions { display: flex; gap: 0.4rem; flex: 0 0 auto; }
+      .snap__actions button { padding: 0.4rem 0.7rem; font-size: 0.85rem; font-weight: 550; }
+
+      /* Why the copy was taken, in one word. Deliberately quiet -- it is a
+         footnote on the date, not a status. */
+      .tag {
+        display: inline-block; font-size: 0.72rem; font-weight: 600;
+        letter-spacing: 0.01em; padding: 0.1rem 0.42rem; border-radius: 999px;
+        border: 1px solid var(--line-strong); color: var(--muted);
+        vertical-align: 0.08em; margin-left: 0.4rem;
+      }
+      /* The one copy taken to undo a restore. It is the parachute, so it is the
+         only tag that gets any colour at all. */
+      .tag[data-kind="safety"] {
+        border-color: color-mix(in srgb, var(--attention-dot) 40%, transparent);
+        background: var(--attention-tint);
+        color: var(--attention);
+      }
+
+      .snaps__empty { color: var(--muted); margin: 0.9rem 0 0; }
+      .snaps__foot { color: var(--faint); font-size: 0.82rem; margin: 0.9rem 0 0; }
+
+      .newname { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 0.9rem; }
+      .newname .field { flex: 1 1 12rem; min-width: 0; }
+
+      /* The confirm. A <dialog> rather than confirm(): a modal dialog from a
+         page blocks the extension's own message channel, and this one has to
+         show real numbers the worker just computed. */
+      dialog.confirm {
+        border: 1px solid var(--line-strong); border-radius: var(--radius-lg);
+        background: var(--surface); color: var(--text);
+        padding: 1.4rem 1.5rem; max-width: 30rem; width: calc(100% - 2rem);
+        font: 14px/1.55 var(--font-sans);
+      }
+      dialog.confirm::backdrop { background: rgb(0 0 0 / 45%); }
+      dialog.confirm h3 { margin: 0 0 0.5rem; font-size: 1.05rem; font-weight: 650; }
+      dialog.confirm p { margin: 0 0 0.8rem; }
+      dialog.confirm .actions { justify-content: flex-end; margin-top: 1.2rem; }
+      .plan { list-style: none; margin: 0 0 0.9rem; padding: 0; }
+      .plan li { display: flex; justify-content: space-between; gap: 1rem; padding: 0.28rem 0; }
+      .plan li + li { border-top: 1px solid var(--line); }
+      .plan b { font-weight: 650; font-variant-numeric: tabular-nums; }
+      .plan li[data-zero="1"] { color: var(--faint); }
+      .plan li[data-warn="1"] b { color: var(--exposed); }
+      .note { font-size: 0.85rem; color: var(--muted); }
     </style>
   </head>
   <body>
@@ -196,6 +270,58 @@
       <p class="filehint">Accepts a Netscape bookmark file (.html).</p>
       <p class="result" id="importResult" data-tone="muted"></p>
     </div>
+
+    <!-- The copies Skrim keeps for itself. Placed last on purpose: the two
+         cards above are what a first-time visitor came for, and this one only
+         earns its place once there is something in it. -->
+    <div class="card">
+      <div class="card__head">
+        <h3>Backups Skrim keeps</h3>
+        <label class="switch" title="Automatic backups">
+          <input type="checkbox" id="autoToggle" />
+          <span class="switch__track" aria-hidden="true"></span>
+          <span class="visually-hidden">Automatic backups</span>
+        </label>
+      </div>
+      <p id="autoHint">
+        A copy of your bar is saved right before every hide, and once a day if
+        anything changed. Everything stays on this computer.
+      </p>
+
+      <div class="newname">
+        <input
+          type="text"
+          id="backupLabel"
+          class="field"
+          maxlength="60"
+          placeholder="Name this backup (optional)"
+          autocomplete="off"
+        />
+        <button id="backupNow" type="button">Back up now</button>
+      </div>
+      <p class="result" id="snapResult" data-tone="muted"></p>
+
+      <ul class="snaps" id="snapList"></ul>
+      <p class="snaps__empty" id="snapEmpty" hidden>
+        No backups yet. The first one is saved before your next hide.
+      </p>
+      <p class="snaps__foot" id="snapFoot" hidden></p>
+    </div>
+
+    <dialog class="confirm" id="confirmDialog">
+      <h3 id="confirmTitle">Put your bar back?</h3>
+      <p id="confirmLede"></p>
+      <ul class="plan" id="confirmPlan"></ul>
+      <p class="note" id="confirmNote"></p>
+      <div class="actions">
+        <button id="confirmCancel" type="button">Cancel</button>
+        <!-- The safe way out, offered at the exact moment someone hesitates
+             over the destructive one: nothing is deleted, everything lands in
+             one new folder to sort through by hand. -->
+        <button id="confirmFolder" type="button">Add as a folder instead</button>
+        <button id="confirmGo" class="primary" type="button">Put my bar back</button>
+      </div>
+    </dialog>
 
     <p class="safe">
       Nothing here is ever sent anywhere — this reads your bookmarks on your own

@@ -66,8 +66,11 @@ const MUTATIONS = [
   {
     name: "M2-f  never expire a frame that stopped beating",
     file: "extension/src/sessions.js",
-    from: `    if (!Array.isArray(f?.sids) || f.sids.length === 0 || !(f.lastSeen > now - STALE_MS)) {`,
-    to: `    if (!Array.isArray(f?.sids) || f.sids.length === 0) {`,
+    // The empty-sids case and the beat clock were one condition when this was
+    // written; recorder exemption split them. The DECISION reverted here -- a
+    // frame that stopped beating is never aged out -- is unchanged.
+    from: `    if (!(f.lastSeen > now - STALE_MS)) delete s.frames[k];`,
+    to: `    /* mutated: a frame that stopped beating lives forever */`,
   },
   {
     name: "M2-g  bridge trusts messages from any window, not just its own frame",

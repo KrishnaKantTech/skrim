@@ -235,13 +235,32 @@
                is hidden -- with it up, a setting is just a setting. -->
           <p class="settings__live" id="liveNote" hidden></p>
 
+          <!-- Feature 4: the copies Skrim keeps for itself. A switch, not a
+               button, because it governs something that happens on its own --
+               and it sits above the backup row because it is the reason that
+               row usually has nothing to do. -->
+          <label class="setting" for="autoBackupToggle">
+            <span class="setting__text">
+              <span class="setting__name">Automatic backups</span>
+              <span class="setting__hint" id="autoBackupHint"
+                >Save a copy of your bar before every hide, and once a day. Kept
+                on this computer only.</span
+              >
+            </span>
+            <span class="switch">
+              <input type="checkbox" id="autoBackupToggle" />
+              <span class="switch__track" aria-hidden="true"></span>
+            </span>
+          </label>
+
           <!-- Feature 3: never lose the bar. Copy is instant here; the rest
-               (download, import) needs a file dialog, which closes a popup, so
+               (download, import, and the saved copies) needs a file dialog or
+               room to list things, both of which close or overflow a popup, so
                it opens the backup page. -->
           <div class="setting setting--stack">
             <span class="setting__text">
               <span class="setting__name">Back up your bookmarks</span>
-              <span class="setting__hint"
+              <span class="setting__hint" id="backupHint"
                 >Keep your own copy, so trying this extension never risks
                 losing them.</span
               >
@@ -256,7 +275,7 @@
                 Copy as text
               </button>
               <button id="backupBtn" class="btn btn--ghost" type="button">
-                Download / import…
+                Backups &amp; files…
               </button>
             </div>
           </div>
