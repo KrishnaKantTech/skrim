@@ -444,23 +444,68 @@ async function main() {
     const named = await B(`return document.querySelector("#snapList .snap__name")?.textContent ?? "";`);
     check("Q31", named === "QA good state", "and the typed name is what the list shows", named);
 
-    // Rename it in the row -- through the real button, the real field and a
+    // Rename it in the row -- through the real pencil, the real field and a
     // real Enter, because the Node suite proves the storage and this is the
-    // half that only a browser can: that the editor opens over the row it was
-    // clicked on and that Enter alone commits it.
+    // half only a browser can: that the pencil sits at the end of the title,
+    // that clicking it turns THAT line into the field, and that Enter commits.
+    const pencil = JSON.parse(await B(`
+      const rows = [...document.querySelectorAll("#snapList .snap")];
+      const row = rows.find((r) => r.querySelector(".snap__name")?.textContent === "QA good state");
+      row.scrollIntoView({ block: "center" });
+      const title = row.querySelector(".snap__title");
+      const btn = title.querySelector("button.iconbtn");
+      const r = title.getBoundingClientRect();
+      return JSON.stringify({
+        inTitle: !!btn,
+        last: title.lastElementChild === btn,
+        label: btn?.getAttribute("aria-label") ?? null,
+        hasSvg: !!btn?.querySelector("svg"),
+        rest: btn ? getComputedStyle(btn).opacity : null,
+        x: Math.round(r.left + 20), y: Math.round(r.top + r.height / 2),
+      });
+    `));
+    // A real mouse move, not a reading of the stylesheet. "Hidden until hover"
+    // is exactly the rule that can be present in the sheet and not applying --
+    // wrong selector, wrong media query, a transition that never lands.
+    await cdp.send("Input.dispatchMouseEvent",
+      { type: "mouseMoved", x: pencil.x, y: pencil.y, buttons: 0 }, backup.sessionId);
+    await sleep(500);
+    const onHover = await B(`
+      const rows = [...document.querySelectorAll("#snapList .snap")];
+      const row = rows.find((r) => r.querySelector(".snap__name")?.textContent === "QA good state");
+      return getComputedStyle(row.querySelector(".snap__title button.iconbtn")).opacity;
+    `);
+    check("Q31a", pencil.inTitle === true && pencil.last === true && pencil.hasSvg === true &&
+      /^Rename the backup from /.test(pencil.label ?? "") &&
+      pencil.rest === "0" && onHover === "1",
+      "a named pencil sits at the end of the title, hidden until the row is hovered",
+      `rest=${pencil.rest} hover=${onHover} label=${pencil.label}`);
     await B(`
       const rows = [...document.querySelectorAll("#snapList .snap")];
       const row = rows.find((r) => r.querySelector(".snap__name")?.textContent === "QA good state");
-      [...row.querySelectorAll("button")].find((b) => b.textContent === "Rename").click();
+      row.querySelector(".snap__title button.iconbtn").click();
     `, { userGesture: true });
     const editing = await B(`
       const f = document.querySelector("#snapList .snap__rename .field");
-      return JSON.stringify({ open: !!f, value: f?.value ?? null, focused: document.activeElement === f });
+      const row = f?.closest(".snap");
+      return JSON.stringify({
+        open: !!f,
+        value: f?.value ?? null,
+        focused: document.activeElement === f,
+        // The field replaced the TITLE and nothing else: the date, the counts
+        // and the three buttons all have to still be there, unmoved.
+        titleGone: !row?.querySelector(".snap__title"),
+        keptDate: !!row?.querySelector(".snap__when"),
+        keptMeta: !!row?.querySelector(".snap__meta"),
+        actions: row ? [...row.querySelectorAll(".snap__actions button")].map((b) => b.textContent).join(",") : null,
+      });
     `);
-    check("Q31b", JSON.parse(editing).open === true &&
-      JSON.parse(editing).value === "QA good state" &&
-      JSON.parse(editing).focused === true,
-      "Rename opens an editor in the row, focused and carrying the old name", editing);
+    const ed = JSON.parse(editing);
+    check("Q31b", ed.open === true && ed.value === "QA good state" && ed.focused === true &&
+      ed.titleGone === true && ed.keptDate === true && ed.keptMeta === true &&
+      ed.actions === "Put back,Download,Delete",
+      "the pencil turns the title into a focused field and leaves the rest of the row alone",
+      editing);
     await B(`
       const f = document.querySelector("#snapList .snap__rename .field");
       f.value = "QA renamed state";
@@ -477,7 +522,7 @@ async function main() {
     await B(`
       const rows = [...document.querySelectorAll("#snapList .snap")];
       const row = rows.find((r) => r.querySelector(".snap__name")?.textContent === "QA renamed state");
-      [...row.querySelectorAll("button")].find((b) => b.textContent === "Rename").click();
+      row.querySelector(".snap__title button.iconbtn").click();
       const f = document.querySelector("#snapList .snap__rename .field");
       f.value = "typed then abandoned";
       f.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
@@ -489,6 +534,24 @@ async function main() {
         names: [...document.querySelectorAll("#snapList .snap__name")].map((n) => n.textContent).join(","),
       });
     `);
+    // Icon AND word on each action. The word is the half that matters: an
+    // icon-only Delete is one mis-click with nothing on screen to warn you.
+    const actionIcons = JSON.parse(await B(`
+      const row = document.querySelector("#snapList .snap");
+      return JSON.stringify([...row.querySelectorAll(".snap__actions button")].map((b) => ({
+        word: b.textContent,
+        svg: !!b.querySelector("svg"),
+        inline: getComputedStyle(b).display,
+      })));
+    `));
+    // "flex", not "inline-flex": .snap__actions is itself a flex container, and
+    // a flex item's inline-flex is blockified to flex. Either answer means the
+    // icon and the word are laid out on one line, which is the actual claim.
+    check("Q31e", actionIcons.length === 3 &&
+      actionIcons.every((b) => b.svg === true && /^(inline-)?flex$/.test(b.inline)) &&
+      actionIcons.map((b) => b.word).join(",") === "Put back,Download,Delete",
+      "each action carries an icon and still says its name", JSON.stringify(actionIcons));
+
     check("Q31d", JSON.parse(afterEsc).open === false &&
       /QA renamed state/.test(JSON.parse(afterEsc).names) &&
       !/abandoned/.test(JSON.parse(afterEsc).names),
@@ -616,10 +679,14 @@ async function main() {
     // top of itself, so the run leaves a picture behind to look at.
     const shots = join(SCRATCH, "shots");
     mkdirSync(shots, { recursive: true });
-    const shot = async (name, target, w, h) => {
+    const shot = async (name, target, w, h, stage) => {
       await cdp.send("Emulation.setDeviceMetricsOverride",
         { width: w, height: h, deviceScaleFactor: 2, mobile: false }, target.sessionId);
       await sleep(400);
+      // Anything the picture needs posed goes here, not before the call: the
+      // override resizes the viewport, which drops :hover and invalidates every
+      // coordinate measured against the old one.
+      if (stage) await stage();
       const { data } = await cdp.send("Page.captureScreenshot",
         { format: "png", captureBeyondViewport: true }, target.sessionId);
       writeFileSync(join(shots, `${name}.png`), Buffer.from(data, "base64"));
@@ -628,7 +695,28 @@ async function main() {
     await shot("popup-settings", popup, 360, 760);
     await cdp.send("Target.activateTarget", { targetId: backup.targetId });
     await B(`window.scrollTo(0, document.body.scrollHeight);`);
-    await shot("backup-page", backup, 820, 1500);
+    // Posed with the pointer on the first row, so one picture carries both
+    // states: the pencil on the row under the cursor, nothing on the others.
+    await shot("backup-page", backup, 820, 1500, async () => {
+      const row = JSON.parse(await B(`
+        window.scrollTo(0, document.body.scrollHeight);
+        const r = document.querySelector("#snapList .snap .snap__title").getBoundingClientRect();
+        return JSON.stringify({ x: Math.round(r.left + 20), y: Math.round(r.top + r.height / 2) });
+      `));
+      await cdp.send("Input.dispatchMouseEvent",
+        { type: "mouseMoved", x: row.x, y: row.y, buttons: 0 }, backup.sessionId);
+      await sleep(400);
+    });
+    // And the same list with one row mid-rename. A field that opens in place of
+    // a title is precisely the layout that passes every behavioural check while
+    // sitting on top of the date beneath it.
+    await B(`document.querySelector("#snapList .snap .snap__title button.iconbtn").click();`,
+      { userGesture: true });
+    await shot("backup-page-renaming", backup, 820, 1500);
+    await B(`
+      const f = document.querySelector("#snapList .snap__rename .field");
+      f.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    `, { userGesture: true });
     console.log(`  screenshots             : ${shots}`);
 
     check("Q25", popupErr.length === 0, "popup logged no errors or warnings", popupErr.join(" | "));

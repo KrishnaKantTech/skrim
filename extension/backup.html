@@ -187,27 +187,78 @@
       .snap:first-child { border-top: 0; }
       .snap__text { flex: 1 1 14rem; min-width: 0; }
       .snap__when { color: var(--text); font-weight: 600; }
-      .snap__name {
-        display: block; color: var(--text); font-weight: 600;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      .snap__name { color: var(--text); font-weight: 600; }
+
+      /* The row's first line, and the one the pencil edits: the name when there
+         is one, the date when there is not. Flex rather than a plain block so a
+         long name truncates AGAINST the pencil instead of shoving it off the
+         row -- the control has to stay reachable on the row it belongs to. */
+      .snap__title { display: flex; align-items: center; gap: 0.15rem; min-width: 0; }
+      .snap__title > .snap__name,
+      .snap__title > .snap__when {
+        min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       }
-      /* A named backup puts the name first and demotes the date; an unnamed one
-         has only the date, which then has to carry full weight. */
-      .snap__name + .snap__when { font-weight: 400; color: var(--muted); font-size: 0.85rem; }
+      /* A named backup puts the name first and demotes the date to a second
+         line; an unnamed one has only the date, which is then IN the title line
+         above and keeps full weight. */
+      .snap__title + .snap__when,
+      .snap__rename + .snap__when {
+        display: block; font-weight: 400; color: var(--muted); font-size: 0.85rem;
+      }
+
+      /* The pencil. A real button, but weighted to read as the tail of the
+         title rather than as a fourth action competing with the three on the
+         right -- which is the whole reason it moved off that side. Resting
+         colour is --muted, not --faint: an icon that can be clicked is a UI
+         component and owes the reader 3:1 even though it carries no text. */
+      .iconbtn {
+        flex: none; display: inline-flex; align-items: center; justify-content: center;
+        width: 26px; height: 26px; padding: 0;
+        border: 0; border-radius: var(--radius-sm);
+        background: none; color: var(--muted); cursor: pointer;
+      }
+      .iconbtn svg { width: 14px; height: 14px; }
+      .iconbtn:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
+      .iconbtn:focus-visible { outline: none; box-shadow: var(--ring); }
+      .iconbtn:disabled { opacity: 0.45; cursor: default; }
+
+      /* The pencil rests hidden and fades in with the row under the pointer:
+         one quiet control per row, times up to thirty-one rows, is a lot of
+         standing furniture for something most people reach for once.
+
+         It is deliberately NOT hidden where hiding it would mean losing it. The
+         fade lives behind (hover: hover), so a touch device -- which has no
+         hover to give and would otherwise be left with no way in at all -- gets
+         it outright; and focus anywhere in the row brings it back, so tabbing
+         to it does not mean tabbing to something invisible. Only the pencil is
+         ever coy: save and cancel live in .snap__rename, outside this selector,
+         because they are the two ways out of an edit already in progress. */
+      @media (hover: hover) {
+        .snap__title > .iconbtn { opacity: 0; transition: opacity 0.15s ease; }
+        .snap:hover .snap__title > .iconbtn,
+        .snap:focus-within .snap__title > .iconbtn { opacity: 1; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .snap__title > .iconbtn { transition: none; }
+      }
       .snap__meta { display: block; color: var(--faint); font-size: 0.82rem; margin-top: 0.1rem; }
       .snap__actions { display: flex; gap: 0.4rem; flex: 0 0 auto; flex-wrap: wrap; }
-      .snap__actions button { padding: 0.4rem 0.7rem; font-size: 0.85rem; font-weight: 550; }
-
-      /* Renaming happens in the row. It takes the whole width the date and the
-         buttons shared, because a name is typed and a 6rem field in the gap
-         left over would be a worse place to type one than the dialog this is
-         deliberately not. */
-      .snap__rename {
-        display: flex; gap: 0.5rem; flex: 1 1 100%; flex-wrap: wrap;
-        align-items: center;
+      /* Icon and word on one line. The icon is sized in em rather than px so it
+         stays in proportion to the label if the type scale ever moves, and
+         flex: none keeps it from being squeezed when the row narrows. */
+      .snap__actions button {
+        display: inline-flex; align-items: center; gap: 0.4rem;
+        padding: 0.4rem 0.7rem; font-size: 0.85rem; font-weight: 550;
       }
-      .snap__rename .field { flex: 1 1 12rem; min-width: 0; }
-      .snap__rename button { padding: 0.4rem 0.7rem; font-size: 0.85rem; font-weight: 550; }
+      .snap__actions button svg { width: 1.05em; height: 1.05em; flex: none; }
+
+      /* The editor takes the title's place and nothing else's: the date, the
+         counts and the three buttons all stay exactly where they were, so the
+         row does not jump under the pointer that opened it. */
+      .snap__rename { display: flex; gap: 0.15rem; align-items: center; min-width: 0; }
+      .snap__rename .field {
+        flex: 1 1 auto; min-width: 0; padding: 0.25rem 0.5rem; font-size: 0.9rem;
+      }
 
       /* Why the copy was taken, in one word. Deliberately quiet -- it is a
          footnote on the date, not a status. */

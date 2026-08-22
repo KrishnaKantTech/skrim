@@ -335,22 +335,9 @@ function snapRow(e) {
   return li;
 }
 
-/** The row as it reads. Kept apart from snapRow so the rename editor can put a
- *  row back without a full re-render -- which would cost a round trip to the
- *  worker and rebuild fourteen other rows to undo one Cancel. */
-function fillSnapRow(li, e) {
-  li.replaceChildren();
-
-  const text = document.createElement("div");
-  text.className = "snap__text";
-
-  if (e.label) {
-    const name = document.createElement("span");
-    name.className = "snap__name";
-    name.textContent = e.label;
-    text.appendChild(name);
-  }
-
+/** The date and its tag: the row's title when the backup has no name, and the
+ *  demoted second line when it has one. */
+function whenLine(e) {
   const when = document.createElement("span");
   when.className = "snap__when";
   when.textContent = whenText(e.at);
@@ -359,7 +346,48 @@ function fillSnapRow(li, e) {
   tag.dataset.kind = e.kind;
   tag.textContent = KIND_WORDS[e.kind] ?? e.kind;
   when.appendChild(tag);
-  text.appendChild(when);
+  return when;
+}
+
+/**
+ * One row, either reading or being renamed.
+ *
+ * Kept apart from snapRow so opening and closing the editor can redraw the one
+ * row it happened in. Going through renderSnaps() instead would cost a round
+ * trip to the worker and rebuild fourteen other rows to undo one Cancel.
+ */
+function fillSnapRow(li, e, editing = false) {
+  li.replaceChildren();
+
+  const text = document.createElement("div");
+  text.className = "snap__text";
+
+  // The title line. Whatever names the row -- the label if it has one, the date
+  // if it does not -- is what the pencil turns into a field, in place.
+  if (editing) {
+    text.appendChild(renameForm(li, e));
+  } else {
+    const title = document.createElement("div");
+    title.className = "snap__title";
+    if (e.label) {
+      const name = document.createElement("span");
+      name.className = "snap__name";
+      name.textContent = e.label;
+      title.appendChild(name);
+    } else {
+      title.appendChild(whenLine(e));
+    }
+    title.appendChild(
+      iconButton(`Rename the backup from ${whenText(e.at)}`, PENCIL, () =>
+        fillSnapRow(li, e, true),
+      ),
+    );
+    text.appendChild(title);
+  }
+  // A named backup keeps its date on a line of its own beneath the name. While
+  // the name is being edited that line is the only thing still saying WHICH
+  // backup this is, so it is shown then too.
+  if (e.label || editing) text.appendChild(whenLine(e));
 
   const meta = document.createElement("span");
   meta.className = "snap__meta";
@@ -374,28 +402,29 @@ function fillSnapRow(li, e) {
   // Restoring reads and rewrites the bar, so it needs a bar that is not hidden.
   // Downloading reads a copy out of storage and needs nothing at all -- which
   // is exactly the button someone wants when their bar is mid-share.
-  actions.appendChild(button("Put back", "primary", () => askRestore(e), true));
-  actions.appendChild(button("Rename", "", () => fillRenameRow(li, e), false));
-  actions.appendChild(button("Download", "", () => downloadSnap(e), false));
-  actions.appendChild(button("Delete", "", () => removeSnap(e), false));
+  actions.appendChild(button("Put back", "primary", () => askRestore(e), true, RESTORE));
+  actions.appendChild(button("Download", "", () => downloadSnap(e), false, DOWNLOAD));
+  actions.appendChild(button("Delete", "", () => removeSnap(e), false, TRASH));
+  // Mid-edit these still work and still mean what they say, but every one of
+  // them ends the row the user is in the middle of typing into. Save or cancel
+  // first; they are two keys away.
+  if (editing) for (const b of actions.children) b.disabled = true;
 
   li.appendChild(text);
   li.appendChild(actions);
 }
 
 /**
- * Rename in the row, not in a dialog.
+ * The editor, in the title's place.
  *
- * The <dialog> below is spent on the one button that rewrites the bookmarks
- * bar, and it earns the interruption by reporting numbers the user has to weigh
- * first. Charging the same interruption for typing a name would flatten the
- * difference between the two. A name is also the edit where the row you are
- * changing, sitting in the list of dates you are trying to tell apart, IS the
+ * Not a dialog. The <dialog> below is spent on the one button that rewrites the
+ * bookmarks bar, and it earns the interruption by reporting numbers the user
+ * has to weigh first; charging the same interruption for typing a name would
+ * flatten the difference between the two. A name is also the edit where the row
+ * you are changing, in the list of dates you are trying to tell apart, IS the
  * context -- so taking it out of the list would remove the reason for it.
  */
-function fillRenameRow(li, e) {
-  li.replaceChildren();
-
+function renameForm(li, e) {
   const form = document.createElement("form");
   form.className = "snap__rename";
 
@@ -406,17 +435,17 @@ function fillRenameRow(li, e) {
   input.autocomplete = "off";
   input.value = e.label ?? "";
   input.placeholder = "Name this backup";
-  // The visible label for this row is a date, and a date is what a screen
-  // reader needs read back to know which of fifteen fields it has landed in.
+  // What names this row on screen is a date, and a date is what a screen reader
+  // needs read back to know which of fifteen fields it has landed in.
   input.setAttribute("aria-label", `Name for the backup from ${whenText(e.at)}`);
 
-  const save = button("Save", "primary", null, false);
+  const save = iconButton("Save this name", CHECK, null);
   save.type = "submit";
-  const cancel = button("Cancel", "", () => fillSnapRow(li, e), false);
+  const cancel = iconButton("Cancel renaming", CROSS, () => fillSnapRow(li, e));
 
-  // A <form> so Enter submits without a keydown handler saying so, and Escape
-  // puts the row back -- the two keys a one-field edit owes anyone who is not
-  // reaching for the mouse.
+  // A <form>, so Enter submits without a handler saying so; Escape puts the row
+  // back. Those are the two keys a one-field edit owes anyone not reaching for
+  // the mouse, and the two buttons are the same two exits for anyone who is.
   form.onsubmit = (ev) => {
     ev.preventDefault();
     commitRename(li, e, input.value);
@@ -428,15 +457,19 @@ function fillRenameRow(li, e) {
   };
 
   form.append(input, save, cancel);
-  li.appendChild(form);
-  input.focus();
-  input.select();
+  // Deferred: the row this form is being built into is not in the document yet
+  // on the first paint, and focus() on a detached node does nothing.
+  queueMicrotask(() => {
+    input.focus();
+    input.select();
+  });
+  return form;
 }
 
 async function commitRename(li, entry, value) {
   const want = String(value ?? "").trim().slice(0, 60);
-  // Nothing typed, or nothing changed: put the row back without troubling the
-  // worker, so Save on an untouched field behaves exactly like Cancel.
+  // Nothing changed: put the row back without troubling the worker, so saving
+  // an untouched field behaves exactly like cancelling.
   if (want === (entry.label ?? "")) {
     fillSnapRow(li, entry);
     return;
@@ -463,11 +496,64 @@ async function commitRename(li, entry, value) {
   await renderSnaps();
 }
 
-function button(label, cls, onClick, needsBar) {
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+// Feather's edit-2, check, x, rotate-ccw, download and trash. Held as path data
+// rather than markup because nothing on this page assembles an element from a
+// string -- see the note at the top of this section -- and that rule does not
+// get an exception for SVG.
+const PENCIL = ["M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"];
+const CHECK = ["M20 6 9 17l-5-5"];
+const CROSS = ["M18 6 6 18", "M6 6l12 12"];
+// Counter-clockwise, not clockwise: this winds the bar BACK to how it was, and
+// the clockwise twin is the redo arrow everywhere else it appears.
+const RESTORE = ["M1 4v6h6", "M3.51 15a9 9 0 1 0 2.13-9.36L1 10"];
+const DOWNLOAD = ["M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "M7 10l5 5 5-5", "M12 15V3"];
+const TRASH = [
+  "M3 6h18",
+  "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2",
+  "M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6",
+];
+
+function icon(paths) {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  for (const d of paths) {
+    const path = document.createElementNS(SVG_NS, "path");
+    path.setAttribute("d", d);
+    svg.appendChild(path);
+  }
+  return svg;
+}
+
+/** A button whose whole face is an icon, so the name it goes by has to be said
+ *  out loud -- as the tooltip a mouse gets and the label a screen reader does. */
+function iconButton(label, paths, onClick) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "iconbtn";
+  b.title = label;
+  b.setAttribute("aria-label", label);
+  b.appendChild(icon(paths));
+  b.onclick = onClick;
+  return b;
+}
+
+function button(label, cls, onClick, needsBar, paths) {
   const b = document.createElement("button");
   b.type = "button";
   if (cls) b.className = cls;
-  b.textContent = label;
+  if (paths) b.appendChild(icon(paths));
+  // A text NODE rather than textContent, which would wipe the icon back out.
+  // Reading b.textContent still returns exactly the label either way: the svg
+  // is paths only and contributes no text of its own.
+  b.appendChild(document.createTextNode(label));
   if (needsBar) {
     b.dataset.needsBar = "1";
     b.disabled = barHidden;
