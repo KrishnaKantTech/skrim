@@ -72,7 +72,7 @@ HOW IT WORKS
 Skrim watches for a screen share starting — in Google Meet, in Zoom on the web, or on any site that asks Chrome for your screen. When one starts:
 
 - everything on your bookmarks bar is moved into a folder inside Other Bookmarks
-- a few neutral placeholder links (Google, Gmail, Calendar, Drive, Maps, News) take their place, so a conspicuously empty bar isn't its own tell
+- a few neutral, unremarkable placeholder links take their place, so a conspicuously empty bar isn't its own tell
 - when the share ends, every bookmark returns to the exact position it came from, and the folder and the placeholders are deleted
 
 Nothing is ever deleted permanently and nothing is copied out of your browser. If the share, Chrome, or the machine dies half-way through, the next startup finishes the restore. If you uninstall while your bookmarks are still hidden, the folder holds a receipt bookmark whose title spells out how to put the bar back by hand.
@@ -483,6 +483,29 @@ Bookmarks-bar visibility is a browser preference with no extension API, so
 moving the bookmarks is the only way to clear the bar. Every move is recorded
 and reversed, and the extension is built around finishing that reversal even
 after a crash.
+
+---
+
+## Rejection history
+
+**0.3.0, 17 Aug 2026 — "Spam and placement in the Store", ref Yellow Argon.**
+Violation: *"Having excessive keywords in the item's description"*, quoting
+exactly `(Google, Gmail, Calendar, Drive, Maps, News)` from the HOW IT WORKS
+list. Nothing was wrong with the package: same permissions, same version, an
+approved 0.2.0 sitting underneath. The parenthetical was a factual list of the
+decoy link names, but six brand names in a row is the shape of keyword stuffing
+and the filter reads shape, not intent. Fixed by naming no brands there.
+
+**The rule this leaves behind:** the description may name a product where it is
+making a claim about that product — "tested in Google Meet and Zoom on the web",
+"the Zoom desktop client captures outside Chrome" — because each of those
+carries information. It may not carry a bare *list* of brand names. The
+trademark line at the foot of the description is fine and should stay; it is
+attribution, not metadata.
+
+Not appealed. The offending clause was six words and the resubmit is a listing
+edit with no package re-upload, so an appeal would have been slower and less
+certain than deleting it.
 
 ---
 

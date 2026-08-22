@@ -257,6 +257,112 @@ async function testUserAddsWhileHidden() {
   void before;
 }
 
+/**
+ * Regression: the 2026-08-21 field failure.
+ *
+ * A user opened the hiding place mid-share and dragged ONE item back onto the
+ * bar. That move is a reorder, not an arrival, so the bar did not get longer --
+ * but restore counted it as one more item on the bar, and on the dirty path the
+ * count IS the index it asks for. Every remaining item then asked for an index
+ * one past the end, Chrome refused it (it rejects, it does not clamp), and the
+ * count only advances on success -- so the refusal was permanent. Eleven of
+ * twelve bookmarks were left in the folder, three attempts burned, the journal
+ * discarded, and the only report was "11 stuck".
+ *
+ * Run under both same-parent index interpretations and both hiding mechanisms,
+ * because the arithmetic is shared and the tuck folder makes the drag ordinary:
+ * it sits on the bar and is meant to be opened.
+ */
+async function testItemAlreadyBackOnBar(mode, tuck) {
+  const label = `[${mode}/${tuck ? "tuck" : "vault"}]`;
+  const mock = build({ sameParentIndexMode: mode });
+  const engine = await loadEngine(mock);
+  await engine.setSettings({ tuckMode: tuck, decoys: false, tuckName: "Bookmarks" });
+  await engine.conceal();
+
+  const KEY = "secureshare.journal";
+  const read = async () => (await mock.api.storage.local.get(KEY))[KEY];
+  let j = await read();
+
+  // The drag: the first journalled item goes back on the bar by hand.
+  await mock.api.bookmarks.move(j.groups[0].items[0].id, { parentId: "1" });
+  // ...and the tree-changed flag that a foreign move sets, which is what
+  // switches restore onto the index that cannot survive being wrong.
+  j = await read();
+  j.dirty = true;
+  await mock.api.storage.local.set({ [KEY]: j });
+
+  const r = await engine.restore();
+  const titles = mock.nodes.get("1").children.map((c) => mock.nodes.get(c).title);
+
+  check(`${label} restore succeeds after a drag-back`, r.ok === true, JSON.stringify(r.stuck));
+  check(`${label} nothing stuck`, (r.stuck ?? []).length === 0, JSON.stringify(r.stuck));
+  check(`${label} every bar item is back`,
+    ["Work", "Headlines", "Personal", "Reading"].every((t) => titles.includes(t)),
+    titles.join(","));
+  check(`${label} journalled relative order preserved`,
+    ["Work", "Headlines", "Personal", "Reading"]
+      .map((t) => titles.indexOf(t))
+      .every((v, i, a) => i === 0 || a[i - 1] < v),
+    titles.join(","));
+  check(`${label} hiding place is gone`,
+    ![...mock.nodes.values()].some((n) => !n.url && (n.title === "Bookmarks" || n.title.startsWith("Skrim —"))),
+    titles.join(","));
+}
+
+/** Every item back on the bar by hand, i.e. the user undid the whole hide. */
+async function testEverythingAlreadyBackOnBar(tuck) {
+  const label = `[all-back/${tuck ? "tuck" : "vault"}]`;
+  const mock = build();
+  const engine = await loadEngine(mock);
+  await engine.setSettings({ tuckMode: tuck, decoys: false, tuckName: "Bookmarks" });
+  await engine.conceal();
+
+  const KEY = "secureshare.journal";
+  const read = async () => (await mock.api.storage.local.get(KEY))[KEY];
+  let j = await read();
+  for (const item of j.groups[0].items) {
+    await mock.api.bookmarks.move(item.id, { parentId: "1" });
+  }
+  j = await read();
+  j.dirty = true;
+  await mock.api.storage.local.set({ [KEY]: j });
+
+  const r = await engine.restore();
+  const titles = mock.nodes.get("1").children.map((c) => mock.nodes.get(c).title);
+  check(`${label} restore succeeds`, r.ok === true, JSON.stringify(r.stuck));
+  check(`${label} no duplicates on the bar`,
+    new Set(titles).size === titles.length, titles.join(","));
+  check(`${label} all four still there`,
+    ["Work", "Headlines", "Personal", "Reading"].every((t) => titles.includes(t)),
+    titles.join(","));
+}
+
+/** A give-up has to say more than a count -- see failureRecord in the engine. */
+async function testFailureRecordIsDiagnosable() {
+  const mock = build();
+  const engine = await loadEngine(mock);
+  await engine.setSettings({ tuckMode: true, decoys: false, tuckName: "Bookmarks" });
+  await engine.conceal();
+
+  const KEY = "secureshare.journal";
+  const j = (await mock.api.storage.local.get(KEY))[KEY];
+  const folderId = j.groups[0].folderId;
+  // Wedge every move: a managed node cannot be moved, and the mock enforces it.
+  for (const id of mock.nodes.get(folderId).children) {
+    mock.nodes.get(id).unmodifiable = "managed";
+  }
+  for (let i = 0; i < 3; i++) await engine.restore();
+
+  const f = await engine.lastFailure();
+  check("give-up files a failure record", !!f && !!f.at, JSON.stringify(f));
+  check("failure record names the mode", f?.mode === "tuck", JSON.stringify(f?.mode));
+  check("failure record carries the reason", (f?.errors ?? []).length > 0, JSON.stringify(f?.errors));
+  check("failure record says where the items are",
+    (f?.where ?? []).some((w) => w.folderId === folderId), JSON.stringify(f?.where));
+  check("failure record names the folder", f?.folderTitle === "Bookmarks", JSON.stringify(f?.folderTitle));
+}
+
 async function testUserDeletesWhileHidden() {
   const mock = build();
   const engine = await loadEngine(mock);
@@ -3499,6 +3605,12 @@ await testEmptyBar();
 await testManaged();
 const hideMs = await testLargeBar();
 await testUserAddsWhileHidden();
+for (const mode of ["before-removal", "after-removal"]) {
+  for (const tuck of [false, true]) await testItemAlreadyBackOnBar(mode, tuck);
+}
+await testEverythingAlreadyBackOnBar(false);
+await testEverythingAlreadyBackOnBar(true);
+await testFailureRecordIsDiagnosable();
 await testUserDeletesWhileHidden();
 await testVaultDeletedWhileHidden();
 await testDraggedBackThenHide();

@@ -260,12 +260,27 @@ function render(s, shares, failure) {
   const has = failure && typeof failure === "object" && failure.at;
   $("failure").hidden = !has;
   if (has) {
+    // Where they are, before how many there are. A count tells a user their
+    // bookmarks are gone; the folder name tells them where to go and get them.
+    // It matters most for a tuck hide, whose folder carries a name the user
+    // chose and is therefore the one container nothing else in the extension
+    // can recognise once the journal has been cleared.
+    const stuck = failure.stuck?.length ?? 0;
+    const they = `${plural(stuck, "bookmark")} ${stuck === 1 ? "is" : "are"} still in`;
+    const held =
+      stuck === 0
+        ? ""
+        : failure.mode === "tuck" && failure.folderTitle
+          ? ` ${they} the “${failure.folderTitle}” folder on your bookmarks bar — open it and drag them out.`
+          : ` ${they} the Skrim folder under Other bookmarks.`;
     $("failureDetail").textContent =
       `${when(failure.at)} — gave up after ${plural(failure.attempts, "attempt")}. ` +
       `Restored ${failure.restored ?? 0}, ` +
-      `${failure.stuck?.length ?? 0} stuck, ` +
+      `${stuck} stuck, ` +
       `${failure.missing?.length ?? 0} missing, ` +
-      `${failure.decoysStuck?.length ?? 0} decoys left behind.`;
+      `${failure.decoysStuck?.length ?? 0} decoys left behind.` +
+      held +
+      (failure.errors?.length ? ` (${failure.errors.join("; ")})` : "");
   }
 }
 

@@ -207,6 +207,33 @@ async function safeRemoveTree(id) {
 }
 
 /**
+ * Put one journalled item back on its bar.
+ *
+ * The index is a REQUEST, never a requirement. chrome.bookmarks.move rejects an
+ * out-of-range index rather than clamping it, so every index this file computes
+ * has to be able to be wrong without costing the user the bookmark -- and an
+ * index that is wrong for one item is usually wrong for every item after it,
+ * because the count it was derived from does not advance on a refusal. A move
+ * with no index at all appends, which cannot be out of range; it costs at worst
+ * one item's position, which is the whole reason a second attempt is worth
+ * making before calling an item stuck.
+ *
+ * The ORIGINAL error is rethrown when the append fails too. It names the index
+ * we actually asked for, which is the one that has to be diagnosable.
+ */
+async function restoreToBar(id, barId, index) {
+  try {
+    return await bmMove(id, { parentId: barId, index });
+  } catch (err) {
+    try {
+      return await bmMove(id, { parentId: barId });
+    } catch {
+      throw err;
+    }
+  }
+}
+
+/**
  * Retitle a node of OURS -- a receipt whose contents changed under it, or a tuck
  * folder the user renamed mid-share. Deliberately NOT self-attributed: an update
  * emits only onChanged, which is deliberately not wired to markDirty (a rename
@@ -497,7 +524,12 @@ export async function sweepOrphanVaults() {
       const queue = byId ? [...real].sort((a, b) => at(a) - at(b)) : real;
       for (const k of queue) {
         try {
-          await bmMove(k.id, { parentId: group.bar.id, index: Math.min(at(k), len) });
+          // Same rule as the restore paths: the index is a request. These items
+          // come out of a vault rather than off the bar, so the count cannot
+          // drift the way it can there -- but a bar changing underneath a sweep
+          // is exactly the reinstall-and-sync case this runs in, and an item
+          // that lands in the wrong place beats one that does not land.
+          await restoreToBar(k.id, group.bar.id, Math.min(at(k), len));
           len++;
           recovered++;
         } catch { /* one stuck item must not block the rest */ }
@@ -903,6 +935,44 @@ async function dropTuckFolders(j) {
   return removed;
 }
 
+/**
+ * What a give-up has to leave behind.
+ *
+ * The journal is cleared once the retries run out, so this record becomes the
+ * only thing that still knows a restore failed -- and the 2026-08-21 failure
+ * showed what it was missing. It said "11 stuck" and no more: not one word of
+ * why any move was refused, and no mention that the eleven were sitting in a
+ * folder called "Bookmarks" on the bar. For a tuck hide that is a folder
+ * nothing left in the extension can recognise afterwards, so the count was
+ * genuinely all the user had. Diagnosing it needed the browser profile on disk.
+ *
+ * `errors` is deduplicated because eleven items refused for one reason is one
+ * fact, and `where` names the container each group's items are still in, so
+ * anything downstream can point at them instead of counting them.
+ */
+function failureRecord(j, fields) {
+  const { attempts, restored, missing, stuck, decoysStuck, mismatches } = fields;
+  return {
+    at: Date.now(),
+    attempts,
+    mode: j.mode ?? "vault",
+    restored,
+    missing: missing.map((m) => m.id),
+    stuck: stuck.map((m) => m.id),
+    errors: [...new Set(stuck.map((s) => s.error).filter(Boolean))].slice(0, 4),
+    where: (j.groups ?? [])
+      .map((e) => ({
+        barId: e.barId,
+        folderId: e.folderId ?? null,
+        vaultId: e.vaultId ?? null,
+      }))
+      .filter((w) => w.folderId || w.vaultId),
+    folderTitle: j.folderTitle ?? null,
+    decoysStuck,
+    mismatches,
+  };
+}
+
 // ---------------------------------------------------------------------------
 
 async function restoreImpl({ internal = false } = {}) {
@@ -934,14 +1004,23 @@ async function restoreImpl({ internal = false } = {}) {
     // Track length locally so every index is in range without re-reading the
     // bar N times. Chrome rejects out-of-range indices; it does not clamp.
     let len = barKids === null ? 0 : barKids.length;
+    // Which of these are ALREADY on the bar. Moving one of those is a reorder,
+    // not an arrival, so it leaves the bar exactly as long as it was -- and a
+    // length counted by successes is then one past the end for every item after
+    // it, forever, because it only advances when a move succeeds. See
+    // restoreToBar: this is the arithmetic, that is the safety net.
+    const onBar = new Set((barKids ?? []).map((k) => k.id));
 
     for (const item of entry.items) {
       // When the tree changed under us, stale absolute indices are worse than
       // useless; appending at least preserves journalled relative order.
       const target = j.dirty ? len : Math.min(item.index, len);
       try {
-        await bmMove(item.id, { parentId: entry.barId, index: target });
-        len++;
+        await restoreToBar(item.id, entry.barId, target);
+        if (!onBar.has(item.id)) {
+          onBar.add(item.id);
+          len++;
+        }
         restored++;
       } catch (err) {
         // Distinguish "the user deleted it" (permanent, drop it) from "the move
@@ -1023,15 +1102,14 @@ async function restoreImpl({ internal = false } = {}) {
     if (j.attempts >= MAX_RESTORE_ATTEMPTS) {
       gaveUp = true;
       await chrome.storage.local.set({
-        [LAST_FAILURE_KEY]: {
-          at: Date.now(),
+        [LAST_FAILURE_KEY]: failureRecord(j, {
           attempts: j.attempts,
           restored,
-          missing: missing.map((m) => m.id),
-          stuck: stuck.map((m) => m.id),
+          missing,
+          stuck,
           decoysStuck: hk.strays.remaining,
           mismatches: mismatches.length,
-        },
+        }),
       });
       await journal.clear();
     } else {
@@ -1474,13 +1552,21 @@ async function tuckRestoreImpl(j, { internal = false } = {}) {
     // Track length locally so every index is in range without re-reading the bar
     // N times. Chrome rejects an out-of-range index; it does not clamp.
     let len = barKids === null ? 0 : barKids.length;
+    // A tuck folder sits ON the bar and is meant to be opened, so an item the
+    // user dragged back out mid-share is the ordinary case here, not the exotic
+    // one. Moving it back is a reorder, which does not lengthen the bar. See
+    // the same set in restoreImpl for why counting successes cannot stand in.
+    const onBar = new Set((barKids ?? []).map((k) => k.id));
     for (const item of entry.items) {
       // When the tree changed under us, a stale absolute index is worse than
       // useless; appending preserves journalled relative order instead.
       const target = j.dirty ? len : Math.min(item.index, len);
       try {
-        await bmMove(item.id, { parentId: entry.barId, index: target });
-        len++;
+        await restoreToBar(item.id, entry.barId, target);
+        if (!onBar.has(item.id)) {
+          onBar.add(item.id);
+          len++;
+        }
         restored++;
       } catch (err) {
         if (await nodeExists(item.id)) {
@@ -1548,15 +1634,14 @@ async function tuckRestoreImpl(j, { internal = false } = {}) {
     if (j.attempts >= MAX_RESTORE_ATTEMPTS) {
       gaveUp = true;
       await chrome.storage.local.set({
-        [LAST_FAILURE_KEY]: {
-          at: Date.now(),
+        [LAST_FAILURE_KEY]: failureRecord(j, {
           attempts: j.attempts,
           restored,
-          missing: missing.map((m) => m.id),
-          stuck: stuck.map((m) => m.id),
+          missing,
+          stuck,
           decoysStuck,
           mismatches: mismatches.length,
-        },
+        }),
       });
       await journal.clear();
     } else {

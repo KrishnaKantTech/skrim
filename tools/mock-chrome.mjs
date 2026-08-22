@@ -307,9 +307,19 @@ export class MockChrome {
             if (at < 0 || at > oldParent.children.length) throw new Error("Index out of bounds.");
             oldParent.children.splice(at, 0, id);
           } else {
+            // Validate BEFORE mutating. Chrome checks the index in the
+            // extension function and returns an error without ever reaching
+            // BookmarkModel::Move, so a rejected move leaves the tree exactly
+            // as it was. This used to splice the node out of its parent first
+            // and throw afterwards, which destroyed a bookmark on a move Chrome
+            // would simply have refused -- a mock that loses data on the error
+            // path cannot be used to prove anything about a restore.
+            const cap = sameParent
+              ? newParent.children.length - 1 // its own slot is about to free up
+              : newParent.children.length;
+            const at = index === undefined ? cap : index;
+            if (at < 0 || at > cap) throw new Error("Index out of bounds.");
             oldParent.children.splice(from, 1);
-            const at = index === undefined ? newParent.children.length : index;
-            if (at < 0 || at > newParent.children.length) throw new Error("Index out of bounds.");
             newParent.children.splice(at, 0, id);
             node.parentId = newParent.id;
           }
